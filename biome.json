@@ -22,7 +22,10 @@
       "project": "all"
     },
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "correctness": {
+        "useImportExtensions": "off"
+      }
     }
   },
   "javascript": {
