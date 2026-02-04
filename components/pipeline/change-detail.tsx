@@ -205,7 +205,18 @@ export function ChangeDetail({
         router.push(`/runs/${activeRunId}`);
         return;
       }
-      const runId = await startRalphRun(change.id);
+      
+      // Get current project config from localStorage
+      let projectConfig;
+      const savedProjects = localStorage.getItem("open-agent-projects");
+      const activeProjectId = localStorage.getItem("open-agent-active-project");
+      
+      if (savedProjects && activeProjectId) {
+        const projects = JSON.parse(savedProjects);
+        projectConfig = projects.find((p: any) => p.id === activeProjectId);
+      }
+
+      const runId = await startRalphRun(change.id, projectConfig);
       router.push(`/runs/${runId}`);
     } catch (error) {
       console.error("Failed to start Ralph run:", error);

@@ -6,6 +6,7 @@ export const runs = sqliteTable("runs", {
   status: text("status").notNull(),
   createdAt: text("created_at").notNull(),
   changeId: text("change_id"),
+  projectConfig: text("project_config"), // JSON string of ProjectConfig
 });
 
 export const runsRelations = relations(runs, ({ many }) => ({

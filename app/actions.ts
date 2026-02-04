@@ -17,6 +17,7 @@ import {
 import type { ArtifactType } from "@/lib/openspec/types";
 import { validateChange } from "@/lib/openspec/validator";
 import { logs, runs, tasks } from "@/lib/schema";
+import { ProjectConfig } from "@/lib/openspec/types";
 
 export async function getDashboardStats() {
   const [activeRunsCount, completedTasks] = await Promise.all([
@@ -130,7 +131,7 @@ export async function stopRalphRun(runId: string) {
   });
 }
 
-export async function startRalphRun(changeId: string) {
+export async function startRalphRun(changeId: string, projectConfig?: ProjectConfig) {
   const runId = `run-${Math.random().toString(36).substring(2, 9)}`;
   const now = new Date().toISOString();
 
@@ -140,6 +141,7 @@ export async function startRalphRun(changeId: string) {
     status: "running",
     createdAt: now,
     changeId,
+    projectConfig: projectConfig ? JSON.stringify(projectConfig) : null,
   });
 
   // Create Tasks (Mocked initial tasks)

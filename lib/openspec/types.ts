@@ -91,3 +91,11 @@ export const ExecErrorSchema = z.object({
   message: z.string().optional(),
 });
 export type ExecError = z.infer<typeof ExecErrorSchema>;
+
+export const ProjectConfigSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  path: z.string(),
+  checkCommand: z.string().default("bun run check"),
+});
+export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
