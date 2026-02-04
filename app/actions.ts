@@ -2,7 +2,7 @@
 import { desc, eq } from "drizzle-orm";
 import db from "@/lib/db";
 import {
-  fixArtifactContent,
+  fixAllArtifacts,
   generateArtifactInstructions,
 } from "@/lib/openspec/generator";
 import {
@@ -10,6 +10,7 @@ import {
   deleteChange,
   getArtifactContent,
   getChangeStatus,
+  getSpecsList,
   renameChange,
   saveArtifact,
 } from "@/lib/openspec/service";
@@ -29,12 +30,21 @@ export async function generateInstructions(
   return await generateArtifactInstructions(changeId, type, language);
 }
 
+export interface FixResult {
+  modifiedFiles: {
+    type: ArtifactType;
+    filePath?: string;
+    description: string;
+  }[];
+  success: boolean;
+}
+
 export async function fixArtifact(
-  content: string,
+  changeId: string,
   errors: string[],
   language: "en" | "ko" = "en",
-) {
-  return await fixArtifactContent(content, errors, language);
+): Promise<FixResult> {
+  return await fixAllArtifacts(changeId, errors, language);
 }
 
 export async function getOpenSpecChangeStatus(changeId: string) {
@@ -45,16 +55,25 @@ export async function validateOpenSpecChange(changeId: string) {
   return await validateChange(changeId);
 }
 
-export async function loadArtifact(changeId: string, type: ArtifactType) {
-  return await getArtifactContent(changeId, type);
+export async function loadArtifact(
+  changeId: string,
+  type: ArtifactType,
+  filePath?: string,
+) {
+  return await getArtifactContent(changeId, type, filePath);
 }
 
 export async function updateArtifact(
   changeId: string,
   type: ArtifactType,
   content: string,
+  filePath?: string,
 ) {
-  await saveArtifact(changeId, type, content);
+  await saveArtifact(changeId, type, content, filePath);
+}
+
+export async function fetchSpecsList(changeId: string) {
+  return await getSpecsList(changeId);
 }
 
 export async function deleteOpenSpecChange(id: string) {

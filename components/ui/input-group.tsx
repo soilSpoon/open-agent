@@ -58,9 +58,11 @@ function InputGroupAddon({
         className,
       )}
       onClick={(e) => {
+        const target = e.target;
         if (
-          (e.target as HTMLElement).closest("button") &&
-          e.target !== e.currentTarget
+          target instanceof HTMLElement &&
+          target.closest("button") &&
+          target !== e.currentTarget
         ) {
           return;
         }

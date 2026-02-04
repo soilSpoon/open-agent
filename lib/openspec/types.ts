@@ -1,41 +1,86 @@
-export interface OpenSpecChange {
-  id: string; // Folder name (e.g., "add-dark-mode")
-  title: string; // From .openspec.yaml or folder name
-  status: "active" | "archived";
-  createdAt: Date;
-  updatedAt: Date;
-  artifacts: {
-    proposal: ArtifactStatus;
-    specs: ArtifactStatus;
-    design: ArtifactStatus;
-    tasks: ArtifactStatus;
-  };
-}
+import { z } from "zod";
 
-export interface ArtifactStatus {
-  exists: boolean;
-  path: string;
-  lastModified?: Date;
-}
+export const ArtifactTypeSchema = z.enum([
+  "proposal",
+  "specs",
+  "design",
+  "tasks",
+]);
+export type ArtifactType = z.infer<typeof ArtifactTypeSchema>;
 
-export interface OpenSpecArtifactStatus {
-  id: string;
-  status: "pending" | "done" | "ready" | "blocked";
-  path: string;
-  missingDeps?: string[];
-  description?: string;
-}
+export const ArtifactStatusSchema = z.object({
+  exists: z.boolean(),
+  path: z.string(),
+  lastModified: z.date().optional(),
+});
+export type ArtifactStatus = z.infer<typeof ArtifactStatusSchema>;
 
-export interface OpenSpecCLIStatus {
-  schemaName: string;
-  artifacts: OpenSpecArtifactStatus[];
-  isComplete: boolean;
-}
+export const OpenSpecChangeSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.enum(["active", "archived"]),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  artifacts: z.object({
+    proposal: ArtifactStatusSchema,
+    specs: ArtifactStatusSchema,
+    design: ArtifactStatusSchema,
+    tasks: ArtifactStatusSchema,
+  }),
+});
+export type OpenSpecChange = z.infer<typeof OpenSpecChangeSchema>;
 
-export type ArtifactType = "proposal" | "specs" | "design" | "tasks";
+export const OpenSpecArtifactStatusSchema = z.object({
+  id: z.string(),
+  status: z.enum(["pending", "done", "ready", "blocked"]),
+  outputPath: z.string().optional(),
+  missingDeps: z.array(z.string()).optional(),
+  description: z.string().optional(),
+});
+export type OpenSpecArtifactStatus = z.infer<
+  typeof OpenSpecArtifactStatusSchema
+>;
 
-export interface ArtifactContent {
-  type: ArtifactType;
-  content: string;
-  lastModified: Date;
-}
+export const OpenSpecCLIStatusSchema = z.object({
+  schemaName: z.string(),
+  artifacts: z.array(OpenSpecArtifactStatusSchema),
+  isComplete: z.boolean(),
+});
+export type OpenSpecCLIStatus = z.infer<typeof OpenSpecCLIStatusSchema>;
+
+export const ArtifactContentSchema = z.object({
+  type: ArtifactTypeSchema,
+  content: z.string(),
+  lastModified: z.date(),
+});
+export type ArtifactContent = z.infer<typeof ArtifactContentSchema>;
+
+export const SpecEntrySchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  type: z.enum(["file", "directory"]),
+});
+export type SpecEntry = z.infer<typeof SpecEntrySchema>;
+
+export const RunLogSchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  level: z.enum(["info", "warn", "error"]),
+  message: z.string(),
+});
+export type RunLog = z.infer<typeof RunLogSchema>;
+
+export const RunTaskSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.enum(["pending", "running", "completed", "failed"]),
+});
+export type RunTask = z.infer<typeof RunTaskSchema>;
+
+export const RunDataSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  logs: z.array(RunLogSchema),
+  tasks: z.array(RunTaskSchema),
+});
+export type RunData = z.infer<typeof RunDataSchema>;

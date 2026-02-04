@@ -74,6 +74,8 @@ export default async function ChangesPage() {
   );
 }
 
+import { type ArtifactType, ArtifactTypeSchema } from "@/lib/openspec/types";
+
 function ArtifactIcon({
   type,
   active,
@@ -83,14 +85,15 @@ function ArtifactIcon({
   active: boolean;
   label: string;
 }) {
-  const icons = {
+  const icons: Record<ArtifactType, typeof FileText> = {
     proposal: FileText,
     specs: Code,
     design: Palette,
     tasks: ListTodo,
   };
-  // @ts-expect-error
-  const Icon = icons[type] || FileText;
+
+  const parsedType = ArtifactTypeSchema.safeParse(type);
+  const Icon = parsedType.success ? icons[parsedType.data] : FileText;
 
   return (
     <div

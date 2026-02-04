@@ -18,7 +18,7 @@ export default async function Page({
         </div>
         <div className="text-sm text-muted-foreground">ID: {change.id}</div>
       </div>
-      <ChangeDetail change={change} />
+      <ChangeDetail change={change} changeId={id} />
     </div>
   );
 }

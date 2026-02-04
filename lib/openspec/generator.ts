@@ -1,7 +1,12 @@
 "use server";
 import { exec, spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { z } from "zod";
+import { getArtifactContent, saveArtifact } from "./service";
+import { getSpecsList } from "./specs-utils";
+import type { ArtifactType } from "./types";
 
 const execAsync = promisify(exec);
 
@@ -15,7 +20,7 @@ interface ToolUseContent {
   type: "tool_use";
   id: string;
   name: string;
-  input: Record<string, unknown>;
+  input: Record<string, string | number | boolean | null>;
 }
 
 interface AssistantMessage {
@@ -35,20 +40,23 @@ interface ErrorResultMessage {
 
 function isAssistantMessage(msg: unknown): msg is AssistantMessage {
   if (typeof msg !== "object" || msg === null) return false;
-  const m = msg as Record<string, unknown>;
+  const m = msg as Record<string, string | number | boolean | object | null>;
   return (
     m.type === "assistant" &&
     typeof m.message === "object" &&
     m.message !== null &&
-    (m.message as Record<string, unknown>).type === "message"
+    (m.message as Record<string, string | number | boolean | object | null>)
+      .type === "message"
   );
 }
 
 function isErrorMessage(msg: unknown): msg is ErrorResultMessage {
   if (typeof msg !== "object" || msg === null) return false;
-  const m = msg as Record<string, unknown>;
+  const m = msg as Record<string, string | number | boolean | object | null>;
   return m.type === "result" && m.is_error === true;
 }
+
+const ArtifactTypeSchema = z.enum(["proposal", "specs", "design", "tasks"]);
 
 async function getOpenSpecInstructions(
   changeId: string,
@@ -61,18 +69,12 @@ async function getOpenSpecInstructions(
     "openspec",
   );
 
-  // Map internal types to CLI arguments
-  const typeMap: Record<string, string> = {
-    proposal: "proposal",
-    specs: "specs",
-    design: "design",
-    tasks: "tasks",
-  };
-
-  const cliArtifact = typeMap[artifactType];
-  if (!cliArtifact) {
+  const parsedType = ArtifactTypeSchema.safeParse(artifactType);
+  if (!parsedType.success) {
     throw new Error(`Unknown artifact type: ${artifactType}`);
   }
+
+  const cliArtifact = parsedType.data;
 
   try {
     const { stdout } = await execAsync(
@@ -90,7 +92,6 @@ export async function generateArtifactInstructions(
   artifactType: string,
   language: "en" | "ko" = "en",
 ): Promise<string> {
-  // 1. Get the prompt from OpenSpec
   const instructions = await getOpenSpecInstructions(changeId, artifactType);
 
   const languageInstruction =
@@ -98,8 +99,6 @@ export async function generateArtifactInstructions(
       ? "IMPORTANT: Generate the content in Korean (한국어). However, for requirements, you MUST use the English keywords 'SHALL' or 'MUST' to satisfy the validator. Example: '시스템은 사용자가 테마를 전환할 수 있게 해야 한다 (SHALL).'"
       : "Generate the content in English.";
 
-  // 2. Use Amp CLI directly via local binary
-  // We wrap the instructions in a clear directive for the agent
   const prompt = `
 You are an expert software architect and product manager.
 Please generate the content for the '${artifactType}' artifact based on the following instructions and context from OpenSpec.
@@ -113,11 +112,48 @@ ${instructions}
   return await runAmp(prompt);
 }
 
-export async function fixArtifactContent(
-  content: string,
+export async function fixAllArtifacts(
+  changeId: string,
   errors: string[],
   language: "en" | "ko" = "en",
-): Promise<string> {
+) {
+  // 1. Get all artifact contents
+  const [proposal, design, tasks, specsList] = await Promise.all([
+    getArtifactContent(changeId, "proposal"),
+    getArtifactContent(changeId, "design"),
+    getArtifactContent(changeId, "tasks"),
+    getSpecsList(changeId),
+  ]);
+
+  const specsContents = await Promise.all(
+    specsList.map(async (f) => ({
+      type: "specs" as const,
+      filePath: f.path,
+      content:
+        (await getArtifactContent(changeId, "specs", f.path))?.content ?? "",
+    })),
+  );
+
+  const artifacts = [
+    {
+      type: "proposal" as const,
+      filePath: undefined,
+      content: proposal?.content ?? "",
+    },
+    ...specsContents,
+    {
+      type: "design" as const,
+      filePath: undefined,
+      content: design?.content ?? "",
+    },
+    {
+      type: "tasks" as const,
+      filePath: undefined,
+      content: tasks?.content ?? "",
+    },
+  ];
+
+  // 2. Prepare AI prompt
   const languageInstruction =
     language === "ko"
       ? "IMPORTANT: Provide the fixed content in Korean (한국어). However, for requirements, you MUST use the English keywords 'SHALL' or 'MUST' to satisfy the validator. Example: '시스템은 사용자가 테마를 전환할 수 있게 해야 한다 (SHALL).'"
@@ -125,41 +161,79 @@ export async function fixArtifactContent(
 
   const prompt = `
 You are an expert technical writer and software architect.
-The following artifact content failed validation with the listed errors.
-Please fix the content to resolve all errors.
-
-Common fixes needed:
-- For "must contain SHALL or MUST" errors: Rewrite requirements to use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY) in uppercase.
-  Example: "The system should do X" -> "The system SHALL do X".
-- Keep the original meaning and structure.
-- Return ONLY the fixed markdown content.
-
-${languageInstruction}
+The following OpenSpec artifacts failed validation with the listed errors.
+Please fix the content across all files to resolve all errors and ensure consistency.
 
 Errors:
 ${errors.map((e) => `- ${e}`).join("\n")}
 
-Content:
-${content}
+Current artifacts:
+${artifacts
+  .map(
+    (a) => `
+--- FILE: ${a.type}${a.filePath ? ` (${a.filePath})` : ""} ---
+${a.content}
+`,
+  )
+  .join("\n")}
+
+Instructions:
+- Rewrite requirements to use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY) in uppercase to satisfy validation.
+- Maintain consistency across all files.
+- Return ONLY a JSON object containing the modified files.
+- Each item in 'modifiedFiles' must have 'type', 'filePath' (for specs), 'description' (what was fixed), and 'content' (full new content).
+
+Expected JSON format:
+{
+  "modifiedFiles": [
+    {
+      "type": "specs",
+      "filePath": "dark-mode/spec.md",
+      "description": "Fixed requirement keywords",
+      "content": "... full content ..."
+    }
+  ]
+}
+
+${languageInstruction}
 `;
 
-  return await runAmp(prompt);
+  // 3. Run AI
+  const response = await runAmp(prompt);
+
+  // 4. Parse response and save files
+  try {
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON found in AI response");
+
+    const result = JSON.parse(jsonMatch[0]);
+    const modifiedFiles = [];
+
+    for (const file of result.modifiedFiles) {
+      await saveArtifact(changeId, file.type, file.content, file.filePath);
+      modifiedFiles.push({
+        type: file.type,
+        filePath: file.filePath,
+        description: file.description || "Fixed validation errors",
+      });
+    }
+
+    return { success: true, modifiedFiles };
+  } catch (error) {
+    console.error("Failed to parse or save AI fix:", error);
+    return { success: false, modifiedFiles: [] };
+  }
 }
 
 async function runAmp(prompt: string): Promise<string> {
   let fullResponse = "";
 
   try {
-    // Resolve the local amp binary path
     const ampBin = path.join(process.cwd(), "node_modules", ".bin", "amp");
-
-    // Spawn the process with --execute flag required for --stream-json
-    // We pass the prompt via stdin.
     const child = spawn(ampBin, ["--execute", "--stream-json"], {
-      env: { ...process.env }, // Use default env
+      env: { ...process.env },
     });
 
-    // Write prompt to stdin to avoid argument length limits and ensure stability
     if (child.stdin) {
       child.stdin.write(prompt);
       child.stdin.end();
@@ -174,14 +248,12 @@ async function runAmp(prompt: string): Promise<string> {
       child.stdout.on("data", (chunk) => {
         stdoutBuf += chunk;
         const lines = stdoutBuf.split("\n");
-        // Process all complete lines
         stdoutBuf = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
             const msg = JSON.parse(line);
-
             if (isAssistantMessage(msg)) {
               const textParts = msg.message.content
                 .filter((c): c is TextContent => c.type === "text")
@@ -191,14 +263,8 @@ async function runAmp(prompt: string): Promise<string> {
             } else if (isErrorMessage(msg)) {
               console.error("Amp execution error:", msg.error);
             }
-          } catch (_) {
-            // Ignore parse errors for incomplete lines or non-json output
-          }
+          } catch (_) {}
         }
-      });
-
-      child.stderr.on("data", (chunk) => {
-        console.error("Amp CLI stderr:", chunk);
       });
 
       child.on("close", (code) => {

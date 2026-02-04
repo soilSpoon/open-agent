@@ -1,7 +1,6 @@
 "use client";
 
 import { useId } from "react";
-import { useSettings } from "@/components/settings-provider";
 import {
   Card,
   CardContent,
@@ -17,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useSettings } from "@/lib/settings-context";
 
 export function LanguageSettings() {
   const { language, setLanguage } = useSettings();
@@ -35,7 +35,11 @@ export function LanguageSettings() {
           <Label htmlFor={id}>AI Output Language</Label>
           <Select
             value={language}
-            onValueChange={(value) => setLanguage(value as "en" | "ko")}
+            onValueChange={(value) => {
+              if (value === "en" || value === "ko") {
+                setLanguage(value);
+              }
+            }}
           >
             <SelectTrigger id={id} className="w-[200px]">
               <SelectValue placeholder="Select language" />

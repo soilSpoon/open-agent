@@ -25,9 +25,22 @@ export async function validateChange(
     await execAsync(`"${openspecBin}" validate "${changeId}"`);
     return { valid: true, errors: [] };
   } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; message: string };
-    // Capture stdout/stderr from the error object if available
-    const output = err.stdout || err.stderr || err.message;
+    let output = "";
+    if (error && typeof error === "object") {
+      if ("stdout" in error && typeof error.stdout === "string") {
+        output += error.stdout;
+      }
+      if ("stderr" in error && typeof error.stderr === "string") {
+        output += error.stderr;
+      }
+      if (
+        output === "" &&
+        "message" in error &&
+        typeof error.message === "string"
+      ) {
+        output = error.message;
+      }
+    }
     // Simple parsing of lines that look like errors
     // We want to extract the meaningful error message, removing stack traces or redundant info
     const lines = output.toString().split("\n");

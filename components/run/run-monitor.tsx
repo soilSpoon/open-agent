@@ -4,27 +4,8 @@ import { CheckCircle2, Circle, Loader2, Terminal, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getRun } from "@/app/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { type RunData, RunDataSchema } from "@/lib/openspec/types";
 import { cn } from "@/lib/utils";
-
-interface RunLog {
-  id: string;
-  timestamp: string;
-  level: "info" | "warn" | "error";
-  message: string;
-}
-
-interface RunTask {
-  id: string;
-  title: string;
-  status: "pending" | "running" | "completed" | "failed";
-}
-
-interface RunData {
-  id: string;
-  status: "running" | "completed" | "failed";
-  logs: RunLog[];
-  tasks: RunTask[];
-}
 
 export function RunMonitor({ runId }: { runId: string }) {
   const [run, setRun] = useState<RunData | null>(null);
@@ -33,22 +14,24 @@ export function RunMonitor({ runId }: { runId: string }) {
   useEffect(() => {
     let mounted = true;
 
-    // Initial fetch
-    getRun(runId).then((data) => {
-      if (mounted) {
-        setRun(data as RunData);
-        setLoading(false);
+    async function fetchData() {
+      const data = await getRun(runId);
+      if (mounted && data) {
+        const result = RunDataSchema.safeParse(data);
+        if (result.success) {
+          setRun(result.data);
+          setLoading(false);
+        } else {
+          console.error("Failed to parse run data:", result.error);
+        }
       }
-    });
+    }
+
+    // Initial fetch
+    fetchData();
 
     // Simulate polling
-    const interval = setInterval(() => {
-      getRun(runId).then((data) => {
-        if (mounted) {
-          setRun(data as RunData);
-        }
-      });
-    }, 2000);
+    const interval = setInterval(fetchData, 2000);
 
     return () => {
       mounted = false;

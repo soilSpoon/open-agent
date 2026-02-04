@@ -2,12 +2,14 @@ import { exec } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type {
-  ArtifactContent,
-  ArtifactStatus,
-  ArtifactType,
-  OpenSpecChange,
-  OpenSpecCLIStatus,
+import { getSpecsContent, getSpecsList } from "./specs-utils";
+import {
+  type ArtifactContent,
+  type ArtifactStatus,
+  type ArtifactType,
+  type OpenSpecChange,
+  type OpenSpecCLIStatus,
+  OpenSpecCLIStatusSchema,
 } from "./types";
 
 const execAsync = promisify(exec);
@@ -100,7 +102,6 @@ export async function createChange(title: string): Promise<OpenSpecChange> {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
-  // 1. Run openspec CLI to create change directory and metadata
   const openspecBin = path.join(
     process.cwd(),
     "node_modules",
@@ -110,14 +111,16 @@ export async function createChange(title: string): Promise<OpenSpecChange> {
   try {
     await execAsync(`"${openspecBin}" new change "${id}"`);
   } catch (error) {
-    const err = error as { stderr?: string; stdout?: string };
-    // Check if error is because it already exists
-    if (
-      err.stderr?.includes("already exists") ||
-      err.stdout?.includes("already exists")
-    ) {
-      // It exists, just return it
-      return getChange(id);
+    if (error && typeof error === "object") {
+      const stderr = "stderr" in error ? String(error.stderr) : "";
+      const stdout = "stdout" in error ? String(error.stdout) : "";
+
+      if (
+        stderr.includes("already exists") ||
+        stdout.includes("already exists")
+      ) {
+        return getChange(id);
+      }
     }
     console.error("Failed to create change via openspec CLI:", error);
     throw error;
@@ -125,8 +128,6 @@ export async function createChange(title: string): Promise<OpenSpecChange> {
 
   const dir = path.join(CHANGES_DIR, id);
 
-  // 2. Read templates from installed openspec package
-  // We use the 'spec-driven' schema templates by default
   const templateDir = path.join(
     process.cwd(),
     "node_modules",
@@ -138,15 +139,12 @@ export async function createChange(title: string): Promise<OpenSpecChange> {
   );
 
   try {
-    // Read standard templates
     const [proposal, design, tasks] = await Promise.all([
       fs.readFile(path.join(templateDir, "proposal.md"), "utf-8"),
       fs.readFile(path.join(templateDir, "design.md"), "utf-8"),
       fs.readFile(path.join(templateDir, "tasks.md"), "utf-8"),
     ]);
 
-    // 3. Write files to the new change directory
-    // Prepend title for better UX
     const proposalWithTitle = `# Proposal: ${title}\n\n${proposal}`;
     const designWithTitle = `# Design: ${title}\n\n${design}`;
     const tasksWithTitle = `# Tasks: ${title}\n\n${tasks}`;
@@ -159,27 +157,39 @@ export async function createChange(title: string): Promise<OpenSpecChange> {
     ]);
   } catch (e) {
     console.warn("Failed to copy templates from openspec package", e);
-    // Continue even if template copying fails, as the change itself was created
   }
 
   return getChange(id);
 }
 
+export { getSpecsList };
+
 export async function getArtifactContent(
   changeId: string,
   type: ArtifactType,
+  filePath?: string,
 ): Promise<ArtifactContent | null> {
-  // We need to fetch the change to ensure it exists, but we don't need the return value here.
   await getChange(changeId);
+
+  if (type === "specs" && filePath) {
+    const fullPath = path.join(CHANGES_DIR, changeId, "specs", filePath);
+    try {
+      const stats = await fs.stat(fullPath);
+      const content = await fs.readFile(fullPath, "utf-8");
+      return { type, content, lastModified: stats.mtime };
+    } catch {
+      return null;
+    }
+  }
+
   const artifactName = type === "specs" ? "specs" : `${type}.md`;
   const artifactPath = path.join(CHANGES_DIR, changeId, artifactName);
 
   try {
     const stats = await fs.stat(artifactPath);
     if (stats.isDirectory()) {
-      // For specs directory, we might return a summary or list of files
-      // For MVP, just return a placeholder
-      return { type, content: "(Specs directory)", lastModified: stats.mtime };
+      const content = await getSpecsContent(changeId);
+      return { type, content, lastModified: stats.mtime };
     }
     const content = await fs.readFile(artifactPath, "utf-8");
     return { type, content, lastModified: stats.mtime };
@@ -192,16 +202,19 @@ export async function saveArtifact(
   changeId: string,
   type: ArtifactType,
   content: string,
+  filePath?: string,
 ): Promise<void> {
-  const artifactName = type === "specs" ? "specs/README.md" : `${type}.md`; // Simple fallback for specs
-  const filePath = path.join(CHANGES_DIR, changeId, artifactName);
+  let artifactName = type === "specs" ? "specs/README.md" : `${type}.md`;
 
-  // Ensure specs dir if writing to it
-  if (type === "specs") {
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
+  if (type === "specs" && filePath) {
+    artifactName = `specs/${filePath}`;
   }
 
-  await fs.writeFile(filePath, content, "utf-8");
+  const fullPath = path.join(CHANGES_DIR, changeId, artifactName);
+
+  await fs.mkdir(path.dirname(fullPath), { recursive: true });
+
+  await fs.writeFile(fullPath, content, "utf-8");
 }
 
 export async function getChangeStatus(
@@ -218,7 +231,12 @@ export async function getChangeStatus(
     const { stdout } = await execAsync(
       `"${openspecBin}" status --change "${id}" --json`,
     );
-    return JSON.parse(stdout) as OpenSpecCLIStatus;
+    const result = OpenSpecCLIStatusSchema.safeParse(JSON.parse(stdout));
+    if (!result.success) {
+      console.error("Failed to parse CLI status:", result.error);
+      return null;
+    }
+    return result.data;
   } catch (error) {
     console.error("Failed to get change status:", error);
     return null;

@@ -8,8 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getChanges } from "@/lib/openspec/service";
 
 export default async function Dashboard() {
-  const changes = await getChanges();
-  const activeRuns = await getActiveRuns();
+  const [changes, activeRuns] = await Promise.all([
+    getChanges(),
+    getActiveRuns(),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">

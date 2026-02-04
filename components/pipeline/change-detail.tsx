@@ -1,16 +1,11 @@
 "use client";
-import {
-  AlertCircle,
-  CheckCircle2,
-  Loader2,
-  Play,
-  Save,
-  Sparkles,
-  Wand2,
-} from "lucide-react";
+import { MarkdownEditor } from "@/components/common/markdown-editor";
+import { TaskVisualEditor } from "@/components/pipeline/task-visual-editor";
+import { AlertCircle, FileCode, LayoutPanelLeft, Loader2, Play, Save, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  fetchSpecsList,
   fixArtifact,
   generateInstructions,
   getOpenSpecChangeStatus,
@@ -19,63 +14,99 @@ import {
   updateArtifact,
   validateOpenSpecChange,
 } from "@/app/actions";
-import { useSettings } from "@/components/settings-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
 import type {
   ArtifactType,
   OpenSpecChange,
   OpenSpecCLIStatus,
+  SpecEntry,
 } from "@/lib/openspec/types";
+import type { Validation } from "@/lib/openspec/validation";
+import { useSettings } from "@/lib/settings-context";
 import { cn } from "@/lib/utils";
 import { PipelineView } from "./pipeline-view";
 import { PlannerStatus } from "./planner-status";
+import { SpecsEditor } from "./specs-editor";
+import { ValidationStatus } from "./validation-status";
 
-export function ChangeDetail({ change }: { change: OpenSpecChange }) {
+export function ChangeDetail({
+  change,
+  changeId,
+}: {
+  change: OpenSpecChange;
+  changeId: string;
+}) {
   const [stage, setStage] = useState<ArtifactType>("proposal");
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [running, setRunning] = useState(false);
-  const [validation, setValidation] = useState<{
-    valid: boolean;
-    errors: string[];
-  } | null>(null);
+  const [validation, setValidation] = useState<Validation | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
   const [fixing, setFixing] = useState(false);
   const [cliStatus, setCliStatus] = useState<OpenSpecCLIStatus | null>(null);
 
+  const [specFiles, setSpecFiles] = useState<SpecEntry[]>([]);
+  const [selectedSpecFile, setSelectedSpecFile] = useState<string | null>(null);
+
+  const [viewMode, setViewMode] = useState<"visual" | "markdown">("visual");
+
+  const { language } = useSettings();
   const router = useRouter();
 
   const [isModified, setIsModified] = useState(false);
   const contentRef = useRef(content);
 
-  const { language } = useSettings();
+  const refreshStatus = useCallback(async () => {
+    setIsValidating(true);
+    try {
+      const [result, newStatus] = await Promise.all([
+        validateOpenSpecChange(change.id),
+        getOpenSpecChangeStatus(change.id),
+      ]);
+      setValidation(result);
+      setCliStatus(newStatus);
+    } finally {
+      setIsValidating(false);
+    }
+  }, [change.id]);
 
   useEffect(() => {
     contentRef.current = content;
   }, [content]);
 
   useEffect(() => {
+    if (stage === "specs") {
+      fetchSpecsList(change.id).then((files) => {
+        setSpecFiles(files);
+        if (files.length > 0 && !selectedSpecFile) {
+          setSelectedSpecFile(files[0].path);
+        }
+      });
+    }
+  }, [change.id, stage, selectedSpecFile]); // selectedSpecFile is needed here to auto-select if nothing is selected
+
+  useEffect(() => {
     setLoading(true);
     // Load content
-    loadArtifact(change.id, stage).then((data) => {
-      const newContent = data?.content || "";
-      setContent(newContent);
-      contentRef.current = newContent;
-      setIsModified(false);
-      setLoading(false);
-    });
-    // Load CLI status
-    getOpenSpecChangeStatus(change.id).then(setCliStatus);
-  }, [change.id, stage]);
+    loadArtifact(change.id, stage, selectedSpecFile || undefined).then(
+      (data) => {
+        const newContent = data?.content || "";
+        setContent(newContent);
+        contentRef.current = newContent;
+        setIsModified(false);
+        setLoading(false);
+      },
+    );
+  }, [change.id, stage, selectedSpecFile]);
 
-  // Run validation on mount and after saves
+  // Run validation and status check on mount and after saves
   useEffect(() => {
-    validateOpenSpecChange(change.id).then(setValidation);
-  }, [change.id]);
+    refreshStatus();
+  }, [refreshStatus]);
 
   // Debounced auto-save and validation
   useEffect(() => {
@@ -84,12 +115,13 @@ export function ChangeDetail({ change }: { change: OpenSpecChange }) {
     const timeoutId = setTimeout(async () => {
       const contentToSave = content;
       // Perform background save and validation
-      await updateArtifact(change.id, stage, contentToSave);
-      const result = await validateOpenSpecChange(change.id);
-      const newStatus = await getOpenSpecChangeStatus(change.id);
-
-      setValidation(result);
-      setCliStatus(newStatus);
+      await updateArtifact(
+        change.id,
+        stage,
+        contentToSave,
+        selectedSpecFile || undefined,
+      );
+      await refreshStatus();
 
       // Only reset modified flag if content hasn't changed since we started saving
       if (contentRef.current === contentToSave) {
@@ -107,18 +139,27 @@ export function ChangeDetail({ change }: { change: OpenSpecChange }) {
     fixing,
     change.id,
     stage,
+    refreshStatus,
+    selectedSpecFile,
   ]);
 
   const handleSave = async () => {
     setSaving(true);
-    await updateArtifact(change.id, stage, content);
-    const result = await validateOpenSpecChange(change.id);
-    const newStatus = await getOpenSpecChangeStatus(change.id);
-    setValidation(result);
-    setCliStatus(newStatus);
-    setIsModified(false);
-    setSaving(false);
-    router.refresh();
+    try {
+      await updateArtifact(
+        change.id,
+        stage,
+        content,
+        selectedSpecFile || undefined,
+      );
+      await refreshStatus();
+      setIsModified(false);
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to save:", error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleGenerate = async () => {
@@ -134,10 +175,7 @@ export function ChangeDetail({ change }: { change: OpenSpecChange }) {
       // Auto-save and validate after generation to provide immediate feedback
       setSaving(true);
       await updateArtifact(change.id, stage, generatedContent);
-      const result = await validateOpenSpecChange(change.id);
-      const newStatus = await getOpenSpecChangeStatus(change.id);
-      setValidation(result);
-      setCliStatus(newStatus);
+      await refreshStatus();
       setIsModified(false);
       setSaving(false);
       router.refresh();
@@ -163,23 +201,36 @@ export function ChangeDetail({ change }: { change: OpenSpecChange }) {
     if (!validation || validation.valid) return;
     setFixing(true);
     try {
-      const fixedContent = await fixArtifact(
-        content,
-        validation.errors,
-        language,
-      );
-      setContent(fixedContent);
-      // Automatically save after fix to trigger re-validation
-      await updateArtifact(change.id, stage, fixedContent);
-      const result = await validateOpenSpecChange(change.id);
-      const newStatus = await getOpenSpecChangeStatus(change.id);
-      setValidation(result);
-      setCliStatus(newStatus);
-      router.refresh();
+      const result = await fixArtifact(changeId, validation.errors, language);
+      if (result?.success) {
+        // Reload global status
+        await refreshStatus();
+
+        // If the current stage was one of the modified files, we need to reload its content
+        const isCurrentStageModified = result.modifiedFiles.some(
+          (f) =>
+            f.type === stage &&
+            (!selectedSpecFile || f.filePath === selectedSpecFile),
+        );
+
+        if (isCurrentStageModified) {
+          const data = await loadArtifact(
+            changeId,
+            stage,
+            selectedSpecFile || undefined,
+          );
+          setContent(data?.content || "");
+          setIsModified(false);
+        }
+
+        // Return result so ValidationStatus can show the report
+        return result;
+      }
     } catch (error) {
       console.error("Failed to fix artifact:", error);
     } finally {
       setFixing(false);
+      router.refresh();
     }
   };
 
@@ -192,6 +243,19 @@ export function ChangeDetail({ change }: { change: OpenSpecChange }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <ValidationStatus
+        validation={validation}
+        isLoading={isValidating && !validation}
+        fixing={fixing}
+        onFix={handleFix}
+        onNavigate={(type, filePath) => {
+          setStage(type);
+          if (type === "specs" && filePath) {
+            setSelectedSpecFile(filePath);
+          }
+        }}
+      />
+
       {cliStatus && <PlannerStatus status={cliStatus} />}
 
       <PipelineView
@@ -225,51 +289,9 @@ export function ChangeDetail({ change }: { change: OpenSpecChange }) {
         </Alert>
       )}
 
-      {validation && !validation.valid && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <div className="flex-1">
-            <AlertTitle className="flex items-center justify-between">
-              Validation Errors
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-900"
-                onClick={handleFix}
-                disabled={fixing}
-              >
-                {fixing ? (
-                  <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                ) : (
-                  <Wand2 className="mr-2 h-3 w-3" />
-                )}
-                Auto Fix with AI
-              </Button>
-            </AlertTitle>
-            <AlertDescription className="mt-2">
-              <ul className="list-disc list-inside">
-                {validation.errors.map((err, i) => (
-                  <li key={`${i}-${err.substring(0, 10)}`}>{err}</li>
-                ))}
-              </ul>
-            </AlertDescription>
-          </div>
-        </Alert>
-      )}
-
-      {validation?.valid && (
-        <Alert className="border-green-500 text-green-700 bg-green-50">
-          <CheckCircle2 className="h-4 w-4 text-green-600" />
-          <AlertTitle>All Valid</AlertTitle>
-          <AlertDescription>
-            This change is ready for the next steps.
-          </AlertDescription>
-        </Alert>
-      )}
-
       <Card className="flex-1 min-h-[600px] flex flex-col">
         <CardContent className="p-6 flex-1 flex flex-col">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold capitalize flex items-center gap-2">
               {stage} Editor
               {change.artifacts[stage].exists && (
@@ -282,6 +304,30 @@ export function ChangeDetail({ change }: { change: OpenSpecChange }) {
                 </span>
               )}
             </h2>
+
+            {stage === "tasks" && (
+              <div className="flex bg-muted p-1 rounded-md border shadow-sm">
+                <Button
+                  variant={viewMode === "visual" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 px-3"
+                  onClick={() => setViewMode("visual")}
+                >
+                  <LayoutPanelLeft className="h-4 w-4 mr-2" />
+                  Visual
+                </Button>
+                <Button
+                  variant={viewMode === "markdown" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 px-3"
+                  onClick={() => setViewMode("markdown")}
+                >
+                  <FileCode className="h-4 w-4 mr-2" />
+                  Markdown
+                </Button>
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               <Button
                 variant="secondary"
@@ -332,16 +378,41 @@ export function ChangeDetail({ change }: { change: OpenSpecChange }) {
             <div className="flex-1 flex items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
             </div>
-          ) : (
-            <Textarea
-              className="flex-1 font-mono text-sm leading-relaxed p-4 resize-none bg-gray-50 focus:bg-white transition-colors"
-              value={content}
-              onChange={(e) => {
-                setContent(e.target.value);
+          ) : stage === "specs" ? (
+            <SpecsEditor
+              files={specFiles}
+              selectedFile={selectedSpecFile}
+              onSelectFile={setSelectedSpecFile}
+              content={content}
+              onChangeContent={(value) => {
+                setContent(value);
                 setIsModified(true);
               }}
-              placeholder={`# ${stage.charAt(0).toUpperCase() + stage.slice(1)}\n\nWrite your ${stage} content here...`}
+              placeholder={`# Specs\n\nSelect a file to edit...`}
             />
+          ) : stage === "tasks" && viewMode === "visual" ? (
+            <div className="flex-1 flex flex-col">
+              <TaskVisualEditor
+                value={content}
+                onChange={(value) => {
+                  setContent(value);
+                  setIsModified(true);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col border rounded-md overflow-hidden bg-gray-50 focus-within:bg-white transition-colors">
+              <MarkdownEditor
+                value={content}
+                onChange={(value) => {
+                  setContent(value);
+                  setIsModified(true);
+                }}
+                placeholder={`# ${stage.charAt(0).toUpperCase() + stage.slice(1)}\n\nWrite your ${stage} content here...`}
+                className="flex-1"
+                type={stage}
+              />
+            </div>
           )}
         </CardContent>
       </Card>
