@@ -14,10 +14,9 @@ import {
   renameChange,
   saveArtifact,
 } from "@/lib/openspec/service";
-import type { ArtifactType } from "@/lib/openspec/types";
+import type { ArtifactType, ProjectConfig } from "@/lib/openspec/types";
 import { validateChange } from "@/lib/openspec/validator";
 import { logs, runs, tasks } from "@/lib/schema";
-import { ProjectConfig } from "@/lib/openspec/types";
 
 export async function getDashboardStats() {
   const [activeRunsCount, completedTasks] = await Promise.all([
@@ -131,7 +130,10 @@ export async function stopRalphRun(runId: string) {
   });
 }
 
-export async function startRalphRun(changeId: string, projectConfig?: ProjectConfig) {
+export async function startRalphRun(
+  changeId: string,
+  projectConfig?: ProjectConfig,
+) {
   const runId = `run-${Math.random().toString(36).substring(2, 9)}`;
   const now = new Date().toISOString();
 
@@ -143,34 +145,6 @@ export async function startRalphRun(changeId: string, projectConfig?: ProjectCon
     changeId,
     projectConfig: projectConfig ? JSON.stringify(projectConfig) : null,
   });
-
-  // Create Tasks (Mocked initial tasks)
-  const initialTasks = [
-    {
-      id: `task-${Math.random().toString(36).substring(2, 7)}`,
-      title: "Analyze Requirements",
-      status: "pending",
-    },
-    {
-      id: `task-${Math.random().toString(36).substring(2, 7)}`,
-      title: "Generate Code",
-      status: "pending",
-    },
-    {
-      id: `task-${Math.random().toString(36).substring(2, 7)}`,
-      title: "Run Tests",
-      status: "pending",
-    },
-  ];
-
-  for (const task of initialTasks) {
-    await db.insert(tasks).values({
-      id: task.id,
-      runId,
-      title: task.title,
-      status: task.status,
-    });
-  }
 
   // Initial Log
   await db.insert(logs).values({

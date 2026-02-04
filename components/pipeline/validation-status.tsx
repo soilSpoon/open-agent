@@ -27,6 +27,7 @@ interface ValidationStatusProps {
   fixing: boolean;
   onFix: () => Promise<FixResult | undefined>;
   onNavigate?: (type: ArtifactType, filePath?: string) => void;
+  stage?: ArtifactType;
 }
 
 export function ValidationStatus({
@@ -35,6 +36,7 @@ export function ValidationStatus({
   fixing,
   onFix,
   onNavigate,
+  stage,
 }: ValidationStatusProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [lastFixResult, setLastFixResult] = useState<FixResult | null>(null);
@@ -86,9 +88,41 @@ export function ValidationStatus({
   };
 
   const errorCount = validation?.errors?.length || 0;
+  
+  // Filter out "No deltas found" error as it's common during initial drafting
+  const filteredErrors = validation?.errors?.filter(err => 
+    !err.includes("No deltas found")
+  ) || [];
+  
+  const isEffectiveValid = validation?.valid || filteredErrors.length === 0;
+  const effectiveErrorCount = filteredErrors.length;
+
   const isFixReportVisible =
     lastFixResult && lastFixResult.modifiedFiles.length > 0;
 
+  if (isEffectiveValid && !lastFixResult) {
+    return (
+      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-green-200 bg-green-50/50 animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
+          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-green-100 text-green-600 shrink-0">
+            <CheckCircle2 className="h-5 w-5" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-green-800">
+              {stage === "proposal" && validation?.errors?.some(e => e.includes("No deltas found")) 
+                ? "Proposal in Progress" 
+                : "All Valid"}
+            </h3>
+            <p className="text-sm text-green-700">
+              {stage === "proposal" && validation?.errors?.some(e => e.includes("No deltas found"))
+                ? "Syntactic validation passed. Ready to define specs next."
+                : "Change is valid and ready for next steps."}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-destructive/20 bg-destructive/5 shadow-sm">
       <div className="max-w-4xl mx-auto px-4">
@@ -128,7 +162,7 @@ export function ValidationStatus({
           </div>
         )}
 
-        {validation && !validation.valid && (
+        {validation && !isEffectiveValid && (
           <Accordion
             type="single"
             collapsible
@@ -147,13 +181,13 @@ export function ValidationStatus({
                       <h3 className="font-semibold text-destructive flex items-center gap-2">
                         Change Validation Failed
                         <span className="inline-flex items-center justify-center bg-destructive text-destructive-foreground text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px]">
-                          {errorCount}
+                          {effectiveErrorCount}
                         </span>
                       </h3>
                       {!isOpen && (
                         <p className="text-sm text-destructive/80 truncate">
-                          {validation.errors[0]}
-                          {errorCount > 1 && ` (+${errorCount - 1} more)`}
+                          {filteredErrors[0]}
+                          {effectiveErrorCount > 1 && ` (+${effectiveErrorCount - 1} more)`}
                         </p>
                       )}
                     </div>
@@ -187,7 +221,7 @@ export function ValidationStatus({
                 <div className="pl-11 pb-4 pr-4">
                   <div className="max-h-60 overflow-y-auto pr-2 custom-scrollbar">
                     <ul className="space-y-2 text-sm text-destructive/90">
-                      {validation.errors.map((err, i) => (
+                      {filteredErrors.map((err, i) => (
                         <li
                           key={`${i}-${err.substring(0, 10)}`}
                           className="flex gap-2 items-start bg-white/50 p-2 rounded border border-destructive/10"

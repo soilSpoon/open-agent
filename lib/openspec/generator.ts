@@ -3,7 +3,7 @@ import { exec, spawn } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { getArtifactContent, saveArtifact } from "./service";
+import { getArtifactContent, getChangeStatus, saveArtifact } from "./service";
 import { getSpecsList } from "./specs-utils";
 import { ExecErrorSchema } from "./types";
 
@@ -103,6 +103,27 @@ export async function generateArtifactInstructions(
   artifactType: string,
   language: "en" | "ko" = "en",
 ): Promise<string> {
+  // 1. Check status first to ensure it's ready
+  const status = await getChangeStatus(changeId);
+  const artifactStatus = status?.artifacts.find((a) => a.id === artifactType);
+
+  if (!artifactStatus) {
+    throw new Error(`Artifact ${artifactType} not found in change status.`);
+  }
+
+  if (artifactStatus.status === "pending") {
+    throw new Error(
+      `Artifact ${artifactType} is not ready yet. Please complete preceding steps.`,
+    );
+  }
+
+  if (artifactStatus.status === "blocked") {
+    const deps = artifactStatus.missingDeps?.join(", ") || "unknown dependencies";
+    throw new Error(
+      `Artifact ${artifactType} is blocked by: ${deps}. Please complete them first.`,
+    );
+  }
+
   const instructions = await getOpenSpecInstructions(changeId, artifactType);
 
   const languageInstruction =

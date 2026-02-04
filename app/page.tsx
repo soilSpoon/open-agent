@@ -3,9 +3,9 @@ import Link from "next/link";
 import { getActiveRuns, getDashboardStats, getRuns } from "@/app/actions";
 import { ChangeActions } from "@/components/dashboard/change-actions";
 import { NewChangeButton } from "@/components/dashboard/new-change-button";
+import { ProjectDashboard } from "@/components/dashboard/project-dashboard";
 import { RunActions } from "@/components/dashboard/run-actions";
 import { RunLink } from "@/components/dashboard/run-link";
-import { ProjectDashboard } from "@/components/dashboard/project-dashboard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getChanges } from "@/lib/openspec/service";
 import { cn } from "@/lib/utils";
@@ -29,7 +29,9 @@ export default async function Dashboard() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Changes</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                Total Changes
+              </CardTitle>
               <FileText className="h-4 w-4 text-gray-500" />
             </CardHeader>
             <CardContent>
@@ -63,7 +65,9 @@ export default async function Dashboard() {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                Success Rate
+              </CardTitle>
               <Activity className="h-4 w-4 text-gray-500" />
             </CardHeader>
             <CardContent>
@@ -101,11 +105,15 @@ export default async function Dashboard() {
                             <FileText className="h-5 w-5" />
                           </div>
                           <div>
-                            <p className="font-medium text-lg">{change.title}</p>
+                            <p className="font-medium text-lg">
+                              {change.title}
+                            </p>
                             <div className="flex items-center gap-2 text-sm text-gray-500">
                               <span>
                                 Updated{" "}
-                                {new Date(change.updatedAt).toLocaleDateString()}
+                                {new Date(
+                                  change.updatedAt,
+                                ).toLocaleDateString()}
                               </span>
                               {runForChange && (
                                 <>
@@ -135,7 +143,10 @@ export default async function Dashboard() {
                             {change.status}
                           </div>
                           <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                            <ChangeActions id={change.id} title={change.title} />
+                            <ChangeActions
+                              id={change.id}
+                              title={change.title}
+                            />
                           </div>
                         </div>
                       </Link>

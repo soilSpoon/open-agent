@@ -3,9 +3,19 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { ProjectConfig } from "./types";
+import type { ProjectConfig } from "./types";
 
 const execAsync = promisify(exec);
+
+/**
+ * Callbacks for Ralph to report progress externally
+ */
+export interface RalphCallbacks {
+  onLog: (level: "info" | "warn" | "error", message: string) => Promise<void>;
+  onTaskStart: (taskId: string, title: string) => Promise<void>;
+  onTaskComplete: (taskId: string, success: boolean) => Promise<void>;
+  onRunComplete: (success: boolean, message: string) => Promise<void>;
+}
 
 /**
  * OpenSpec Apply Instructions Schema
@@ -42,12 +52,19 @@ export class Ralph {
   private maxIterations: number;
   private progressFile: string;
   private changeFile: string;
+  private callbacks: RalphCallbacks;
 
-  constructor(config: ProjectConfig, changeId: string, maxIterations = 10) {
+  constructor(
+    config: ProjectConfig,
+    changeId: string,
+    callbacks: RalphCallbacks,
+    maxIterations = 10,
+  ) {
     this.config = config;
     this.changeId = changeId;
+    this.callbacks = callbacks;
     this.maxIterations = maxIterations;
-    
+
     const changeBasePath = path.join(
       config.path,
       "openspec",
@@ -58,13 +75,26 @@ export class Ralph {
     this.changeFile = path.join(changeBasePath, "change.json");
   }
 
+  private async log(
+    level: "info" | "warn" | "error",
+    message: string,
+  ): Promise<void> {
+    console.log(`[Ralph] [${level}] ${message}`);
+    await this.callbacks.onLog(level, message);
+  }
+
   private getOpenspecBin(): string {
     return path.join(this.config.path, "node_modules", ".bin", "openspec");
   }
 
   private getAmpBin(): string {
     // We prefer the amp binary in the project if it exists, otherwise use the one in open-agent
-    const projectAmp = path.join(this.config.path, "node_modules", ".bin", "amp");
+    const projectAmp = path.join(
+      this.config.path,
+      "node_modules",
+      ".bin",
+      "amp",
+    );
     return projectAmp;
   }
 
@@ -87,7 +117,8 @@ export class Ralph {
     try {
       const content = await fs.readFile(this.progressFile, "utf-8");
       const sections = content.split("---");
-      const patterns = sections[0] || "## Codebase Patterns\n- (No patterns discovered yet)\n";
+      const patterns =
+        sections[0] || "## Codebase Patterns\n- (No patterns discovered yet)\n";
       const recentLogs = sections.slice(-3).join("---");
       return `${patterns}\n\n### Recent Iteration Logs\n${recentLogs}`;
     } catch {
@@ -99,10 +130,10 @@ export class Ralph {
    * Append structured log to progress.txt
    */
   private async appendProgress(structuredLog: any, rawSummary: string) {
-    const threadUrl = structuredLog.threadId 
-      ? `https://ampcode.com/threads/${structuredLog.threadId}` 
+    const threadUrl = structuredLog.threadId
+      ? `https://ampcode.com/threads/${structuredLog.threadId}`
       : "Unknown";
-    
+
     const entry = `
 ---
 ## Iteration: ${new Date().toISOString()}
@@ -122,9 +153,10 @@ ${rawSummary}
    * Extract JSON log from agent output
    */
   private parseIterationLog(output: string): { structured: any; raw: string } {
-    const sentinelRegex = /<RALPH_ITERATION_LOG_JSON>([\s\S]*?)<\/RALPH_ITERATION_LOG_JSON>/;
+    const sentinelRegex =
+      /<RALPH_ITERATION_LOG_JSON>([\s\S]*?)<\/RALPH_ITERATION_LOG_JSON>/;
     const match = output.match(sentinelRegex);
-    
+
     if (match && match[1]) {
       try {
         const structured = JSON.parse(match[1].trim());
@@ -134,10 +166,15 @@ ${rawSummary}
         console.error("Failed to parse agent's JSON log.");
       }
     }
-    
-    return { 
-      structured: { task: "Unknown", implemented: [], codebasePatterns: [], gotchas: [] }, 
-      raw: output.slice(-500).trim() 
+
+    return {
+      structured: {
+        task: "Unknown",
+        implemented: [],
+        codebasePatterns: [],
+        gotchas: [],
+      },
+      raw: output.slice(-500).trim(),
     };
   }
 
@@ -147,7 +184,7 @@ ${rawSummary}
   async getStatus(): Promise<ApplyInstructions> {
     const { stdout } = await execAsync(
       `"${this.getOpenspecBin()}" instructions apply --change "${this.changeId}" --json`,
-      { cwd: this.config.path }
+      { cwd: this.config.path },
     );
     return ApplyInstructionsSchema.parse(JSON.parse(stdout));
   }
@@ -155,73 +192,110 @@ ${rawSummary}
   /**
    * Run the autonomous loop
    */
-  async run() {
-    console.log(`Starting Ralph for change: ${this.changeId} in project: ${this.config.name}`);
+  async run(): Promise<{ success: boolean; message?: string }> {
+    await this.log(
+      "info",
+      `Starting Ralph for change: ${this.changeId} in project: ${this.config.name}`,
+    );
 
     for (let i = 1; i <= this.maxIterations; i++) {
-      console.log(`\n--- Iteration ${i} / ${this.maxIterations} ---`);
+      await this.log("info", `--- Iteration ${i} / ${this.maxIterations} ---`);
 
       const status = await this.getStatus();
 
       if (status.state === "all_done") {
-        console.log("All tasks completed! Finalizing change...");
+        await this.log("info", "All tasks completed! Finalizing change...");
         try {
-          await execAsync(`"${this.getOpenspecBin()}" validate "${this.changeId}"`, { cwd: this.config.path });
-          await execAsync(`"${this.getOpenspecBin()}" archive "${this.changeId}" --yes`, { cwd: this.config.path });
-          console.log("Change archived successfully.");
-        } catch (error: any) {
-          console.error("Final validation/archive failed:", error.message);
+          await execAsync(
+            `"${this.getOpenspecBin()}" validate "${this.changeId}"`,
+            { cwd: this.config.path },
+          );
+          await execAsync(
+            `"${this.getOpenspecBin()}" archive "${this.changeId}" --yes`,
+            { cwd: this.config.path },
+          );
+          await this.log("info", "Change archived successfully.");
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await this.log("error", `Final validation/archive failed: ${msg}`);
         }
+        await this.callbacks.onRunComplete(
+          true,
+          "All tasks completed and archived",
+        );
         return { success: true, message: "All tasks completed and archived" };
       }
 
       if (status.state === "blocked") {
-        console.warn("Ralph is blocked:", status.instruction);
+        await this.log("warn", `Ralph is blocked: ${status.instruction}`);
+        await this.callbacks.onRunComplete(false, status.instruction);
         return { success: false, message: status.instruction };
       }
 
       const nextTask = status.tasks.find((t) => !t.done);
       if (!nextTask) {
-        console.log("No pending tasks found.");
+        await this.log("info", "No pending tasks found.");
+        await this.callbacks.onRunComplete(true, "No pending tasks");
         return { success: true, message: "No pending tasks" };
       }
 
-      console.log(`Executing task: ${nextTask.description}`);
+      await this.log(
+        "info",
+        `Executing task: [${nextTask.id}] ${nextTask.description}`,
+      );
+      await this.callbacks.onTaskStart(nextTask.id, nextTask.description);
 
       try {
         const memory = await this.getProgressMemory();
         const specContext = await this.getSpecContext();
-        const response = await this.executeTask(status, nextTask, memory, specContext);
+        const response = await this.executeTask(
+          status,
+          nextTask,
+          memory,
+          specContext,
+        );
 
-        // Quality Check & Validation
-        console.log(`Running quality checks (${this.config.checkCommand}) and OpenSpec validation...`);
+        await this.log(
+          "info",
+          `Running quality checks (${this.config.checkCommand}) and OpenSpec validation...`,
+        );
         try {
-          // 1. Project-specific Quality Check
           await execAsync(this.config.checkCommand, { cwd: this.config.path });
-          
-          // 2. OpenSpec Validation
-          await execAsync(`"${this.getOpenspecBin()}" validate "${this.changeId}"`, { cwd: this.config.path });
+          await execAsync(
+            `"${this.getOpenspecBin()}" validate "${this.changeId}"`,
+            { cwd: this.config.path },
+          );
 
-          console.log("Validation passed. Finalizing task...");
+          await this.log("info", "Validation passed. Finalizing task...");
 
-          // 3. Commit the changes
           const commitMsg = `feat: ${nextTask.id} - ${nextTask.description}`;
-          await execAsync(`git add . && git commit -m "${commitMsg}"`, { cwd: this.config.path });
+          await execAsync(`git add . && git commit -m "${commitMsg}"`, {
+            cwd: this.config.path,
+          });
 
-          // 4. Capture structured learnings from response
           const { structured, raw } = this.parseIterationLog(response);
           await this.appendProgress(structured, raw);
-        } catch (checkError: any) {
-          console.error("Validation failed. Learning from error...");
+          await this.callbacks.onTaskComplete(nextTask.id, true);
+        } catch (checkError: unknown) {
+          const msg =
+            checkError instanceof Error
+              ? checkError.message
+              : String(checkError);
+          await this.log("error", `Validation failed: ${msg}`);
           const { structured, raw } = this.parseIterationLog(response);
           await this.appendProgress(
-            { ...structured, gotchas: [...(structured.gotchas || []), checkError.message] },
-            `Validation failed: ${checkError.message}\n\n${raw}`,
+            {
+              ...structured,
+              gotchas: [...(structured.gotchas || []), msg],
+            },
+            `Validation failed: ${msg}\n\n${raw}`,
           );
+          await this.callbacks.onTaskComplete(nextTask.id, false);
         }
-      } catch (error) {
-        console.error(`Task execution failed:`, error);
-        return { success: false, error };
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        await this.log("error", `Task execution failed: ${msg}`);
+        await this.callbacks.onTaskComplete(nextTask.id, false);
       }
     }
 

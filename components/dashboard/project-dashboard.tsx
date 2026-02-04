@@ -1,12 +1,32 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Folder, ArrowRight, Settings2, Plus, LayoutDashboard, Terminal, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ProjectConfig } from "@/lib/openspec/types";
+import {
+  ArrowRight,
+  Folder,
+  LayoutDashboard,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Terminal,
+} from "lucide-react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { ProjectConfig } from "@/lib/openspec/types";
 
 export function ProjectDashboard({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
@@ -20,7 +40,8 @@ export function ProjectDashboard({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(saved);
         setProjects(parsed);
         if (parsed.length > 0) {
-          const activeId = localStorage.getItem("open-agent-active-project") || parsed[0].id;
+          const activeId =
+            localStorage.getItem("open-agent-active-project") || parsed[0].id;
           setSelectedId(activeId);
         }
       } catch (e) {
@@ -38,7 +59,7 @@ export function ProjectDashboard({ children }: { children: React.ReactNode }) {
     window.location.reload();
   };
 
-  const activeProject = projects.find(p => p.id === selectedId);
+  const activeProject = projects.find((p) => p.id === selectedId);
 
   if (!isLoaded) return null;
 
@@ -50,13 +71,19 @@ export function ProjectDashboard({ children }: { children: React.ReactNode }) {
           <LayoutDashboard className="h-20 w-20 text-primary relative" />
         </div>
         <div className="text-center space-y-3 max-w-md">
-          <h2 className="text-3xl font-bold tracking-tight">Welcome to Open Agent</h2>
+          <h2 className="text-3xl font-bold tracking-tight">
+            Welcome to Open Agent
+          </h2>
           <p className="text-muted-foreground">
-            To start using autonomous Ralph loops, you first need to configure a local project repository.
+            To start using autonomous Ralph loops, you first need to configure a
+            local project repository.
           </p>
         </div>
         <Link href="/settings">
-          <Button size="lg" className="px-8 py-6 text-lg gap-2 group shadow-lg hover:shadow-primary/20 transition-all">
+          <Button
+            size="lg"
+            className="px-8 py-6 text-lg gap-2 group shadow-lg hover:shadow-primary/20 transition-all"
+          >
             Setup First Project
             <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
           </Button>
@@ -73,14 +100,20 @@ export function ProjectDashboard({ children }: { children: React.ReactNode }) {
             <Folder className="h-5 w-5 text-primary" />
           </div>
           <div className="flex flex-col">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Active Workspace</span>
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Active Workspace
+            </span>
             <Select value={selectedId} onValueChange={handleProjectChange}>
               <SelectTrigger className="w-[240px] border-none bg-transparent p-0 h-auto focus:ring-0 text-base font-bold">
-                <span className="truncate">{activeProject?.name || "Select Project"}</span>
+                <span className="truncate">
+                  {activeProject?.name || "Select Project"}
+                </span>
               </SelectTrigger>
               <SelectContent>
-                {projects.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -91,11 +124,15 @@ export function ProjectDashboard({ children }: { children: React.ReactNode }) {
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <div className="flex items-center gap-2 bg-background/50 px-3 py-1.5 rounded-full border border-muted">
               <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
-              <code className="text-xs font-mono">{activeProject.checkCommand}</code>
+              <code className="text-xs font-mono">
+                {activeProject.checkCommand}
+              </code>
             </div>
             <div className="hidden lg:flex items-center gap-2 text-muted-foreground px-3 py-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-              <span className="truncate max-w-[200px]">{activeProject.path}</span>
+              <span className="truncate max-w-[200px]">
+                {activeProject.path}
+              </span>
             </div>
             <Link href="/settings">
               <Button variant="ghost" size="icon" className="h-8 w-8">

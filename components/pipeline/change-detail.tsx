@@ -187,6 +187,16 @@ export function ChangeDetail({
       // Auto-save and validate after generation to provide immediate feedback
       setSaving(true);
       await updateArtifact(change.id, stage, generatedContent);
+      
+      // If we're in specs, refresh the file list to show the new file immediately
+      if (stage === "specs") {
+        const files = await fetchSpecsList(change.id);
+        setSpecFiles(files);
+        if (files.length > 0 && !selectedSpecFile) {
+          setSelectedSpecFile(files[0].path);
+        }
+      }
+
       await refreshStatus();
       setIsModified(false);
       setSaving(false);
@@ -205,12 +215,12 @@ export function ChangeDetail({
         router.push(`/runs/${activeRunId}`);
         return;
       }
-      
+
       // Get current project config from localStorage
       let projectConfig;
       const savedProjects = localStorage.getItem("open-agent-projects");
       const activeProjectId = localStorage.getItem("open-agent-active-project");
-      
+
       if (savedProjects && activeProjectId) {
         const projects = JSON.parse(savedProjects);
         projectConfig = projects.find((p: any) => p.id === activeProjectId);
@@ -275,6 +285,7 @@ export function ChangeDetail({
         isLoading={isValidating && !validation}
         fixing={fixing}
         onFix={handleFix}
+        stage={stage}
         onNavigate={(type, filePath) => {
           setStage(type);
           if (type === "specs" && filePath) {
@@ -290,6 +301,7 @@ export function ChangeDetail({
 
       <PipelineView
         artifacts={change.artifacts}
+        status={cliStatus}
         currentStage={stage}
         onStageSelect={setStage}
       />
