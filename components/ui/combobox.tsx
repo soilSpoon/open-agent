@@ -3,16 +3,16 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
 import { CheckIcon, ChevronDownIcon, XIcon } from "lucide-react";
 import type * as React from "react";
-import { Button } from "@/components/ui/button.tsx";
+import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "@/components/ui/input-group.tsx";
-import { cn } from "@/lib/utils.ts";
+} from "@/components/ui/input-group";
+import { cn } from "@/lib/utils";
 
-function Combobox(props: ComboboxPrimitive.Root.Props) {
+function Combobox<T>(props: ComboboxPrimitive.Root.Props<T>) {
   return <ComboboxPrimitive.Root {...props} />;
 }
 

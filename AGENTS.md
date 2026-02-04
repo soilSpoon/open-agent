@@ -1,12 +1,14 @@
 # Open Agent Codebase Guide
 
 ## Commands
-- **Dev Server**: `deno task dev`
+- **Dev Server**: `deno task dev` (runs Next.js with Node compatibility)
 - **Build**: `deno task build`
 - **Lint/Format**: `deno task check` (uses Biome to lint, format, and organize imports)
 - **Test**: No test script currently defined in package.json.
+- **Dependency Management**: Uses `package.json`.
 
 ## Architecture
+- **Runtime**: Deno (using `package.json` for dependencies).
 - **Framework**: Next.js 16 (App Router), React 19.
 - **Styling**: Tailwind CSS v4, shadcn/ui components (using `@base-ui/react`), Lucide icons.
 - **Tooling**: Biome for fast linting/formatting.

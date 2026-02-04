@@ -3,9 +3,9 @@
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import type * as React from "react";
-import { cn } from "@/lib/utils.ts";
+import { cn } from "@/lib/utils";
 
-function Select(props: SelectPrimitive.Root.Props) {
+function Select<T>(props: SelectPrimitive.Root.Props<T>) {
   return <SelectPrimitive.Root {...props} />;
 }
 

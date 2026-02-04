@@ -1,7 +1,7 @@
 "use client";
 import { Code, FileText, ListTodo, Palette } from "lucide-react";
-import type { ArtifactType } from "@/lib/openspec/types.ts";
-import { cn } from "@/lib/utils.ts";
+import type { ArtifactType } from "@/lib/openspec/types";
+import { cn } from "@/lib/utils";
 
 interface PipelineViewProps {
   artifacts: Record<ArtifactType, { exists: boolean }>;
