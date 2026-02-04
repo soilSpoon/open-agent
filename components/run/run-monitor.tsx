@@ -1,8 +1,16 @@
 "use client";
 
-import { CheckCircle2, Circle, Loader2, Terminal, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  Loader2,
+  Square,
+  Terminal,
+  XCircle,
+} from "lucide-react";
 import { useEffect, useState } from "react";
-import { getRun } from "@/app/actions";
+import { getRun, stopRalphRun } from "@/app/actions";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { type RunData, RunDataSchema } from "@/lib/openspec/types";
 import { cn } from "@/lib/utils";
@@ -49,12 +57,30 @@ export function RunMonitor({ runId }: { runId: string }) {
 
   if (!run) return <div>Run not found</div>;
 
+  const handleStop = async () => {
+    await stopRalphRun(runId);
+  };
+
+  const isRunning = run.status === "running";
+  const activeTask = run.tasks.find((t) => t.status === "running");
+
   return (
     <div className="grid gap-6 md:grid-cols-3">
       {/* Tasks List */}
       <Card className="md:col-span-1">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle>Execution Plan</CardTitle>
+          {isRunning && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleStop}
+              className="text-destructive h-8 px-2"
+            >
+              <Square className="h-4 w-4 mr-1 fill-current" />
+              Stop
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           {run.tasks.map((task) => (
@@ -113,12 +139,24 @@ export function RunMonitor({ runId }: { runId: string }) {
                 </span>
               </div>
             ))}
-            {run.status === "running" && (
+            {isRunning && (
               <div className="flex gap-2 text-gray-500 animate-pulse">
                 <span className="invisible">
                   [{new Date().toLocaleTimeString()}]
                 </span>
-                <span>_</span>
+                <span>
+                  {activeTask
+                    ? `Working on: ${activeTask.title}...`
+                    : "Waiting for next task..."}
+                </span>
+              </div>
+            )}
+            {!isRunning && (
+              <div className="flex gap-2 text-gray-600 italic">
+                <span className="invisible">
+                  [{new Date().toLocaleTimeString()}]
+                </span>
+                <span>Process {run.status}</span>
               </div>
             )}
           </div>

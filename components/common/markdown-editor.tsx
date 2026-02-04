@@ -50,7 +50,8 @@ const theme = {
   quote: "border-l-4 border-primary pl-4 italic bg-muted/30 py-1",
   banner: {
     info: "bg-blue-50 border-l-4 border-blue-500 p-4 mb-4 text-blue-800",
-    warning: "bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-4 text-yellow-800",
+    warning:
+      "bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-4 text-yellow-800",
     error: "bg-red-50 border-l-4 border-red-500 p-4 mb-4 text-red-800",
   },
 };

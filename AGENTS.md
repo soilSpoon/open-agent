@@ -1,17 +1,19 @@
 # Open Agent Codebase Guide
 
 ## Commands
-- **Dev Server**: `deno task dev` (runs Next.js with Node compatibility)
-- **Build**: `deno task build`
-- **Lint/Format**: `deno task check` (uses Biome to lint, format, and organize imports)
-- **Test**: No test script currently defined in package.json.
-- **Dependency Management**: Uses `package.json`.
+- **Dev Server**: `bun dev`
+- **Build**: `bun run build`
+- **Lint/Format**: `bun run check` (uses Biome to lint, format, and organize imports)
+- **DB Push**: `bun run db:push` (Drizzle Kit)
+- **Dependency Management**: Uses `bun` with `package.json`.
 
 ## Architecture
-- **Runtime**: Deno (using `package.json` for dependencies).
+- **Runtime**: Bun.
 - **Framework**: Next.js 16 (App Router), React 19.
+- **Database**: Drizzle ORM with LibSQL.
 - **Styling**: Tailwind CSS v4, shadcn/ui components (using `@base-ui/react`), Lucide icons.
 - **Tooling**: Biome for fast linting/formatting.
+- **OpenSpec**: Spec-driven development using `@fission-ai/openspec`.
 - **Structure**: `app/` (routes), `components/` (UI), `lib/` (utils).
 
 ## Code Style & Conventions

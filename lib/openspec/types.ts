@@ -84,3 +84,10 @@ export const RunDataSchema = z.object({
   tasks: z.array(RunTaskSchema),
 });
 export type RunData = z.infer<typeof RunDataSchema>;
+
+export const ExecErrorSchema = z.object({
+  stdout: z.string().optional(),
+  stderr: z.string().optional(),
+  message: z.string().optional(),
+});
+export type ExecError = z.infer<typeof ExecErrorSchema>;

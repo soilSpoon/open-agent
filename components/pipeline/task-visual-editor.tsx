@@ -1,10 +1,9 @@
 "use client";
 
-import { Checkbox } from "@/components/ui/checkbox";
+import { Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, GripVertical } from "lucide-react";
-import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 interface TaskItem {
@@ -56,9 +55,9 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
     }
 
     if (newSections.length === 0 && value.trim() !== "") {
-        // Fallback or handle non-conforming markdown
+      // Fallback or handle non-conforming markdown
     }
-    
+
     setSections(newSections);
   }, [value]);
 
@@ -91,7 +90,9 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
   };
 
   const updateSectionTitle = (id: string, title: string) => {
-    const newSections = sections.map((s) => (s.id === id ? { ...s, title } : s));
+    const newSections = sections.map((s) =>
+      s.id === id ? { ...s, title } : s,
+    );
     setSections(newSections);
     serialize(newSections);
   };
@@ -113,12 +114,18 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
     serialize(newSections);
   };
 
-  const updateTask = (sectionId: string, taskId: string, updates: Partial<TaskItem>) => {
+  const updateTask = (
+    sectionId: string,
+    taskId: string,
+    updates: Partial<TaskItem>,
+  ) => {
     const newSections = sections.map((s) => {
       if (s.id === sectionId) {
         return {
           ...s,
-          tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, ...updates } : t)),
+          tasks: s.tasks.map((t) =>
+            t.id === taskId ? { ...t, ...updates } : t,
+          ),
         };
       }
       return s;
@@ -144,7 +151,10 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
   return (
     <div className="flex flex-col gap-6 p-4 bg-gray-50/50 min-h-full">
       {sections.map((section) => (
-        <div key={section.id} className="bg-white border rounded-xl shadow-sm overflow-hidden">
+        <div
+          key={section.id}
+          className="bg-white border rounded-xl shadow-sm overflow-hidden"
+        >
           <div className="bg-gray-50/80 px-4 py-3 border-b flex items-center justify-between group">
             <div className="flex items-center gap-2 flex-1">
               <Input
@@ -162,16 +172,18 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
-          
+
           <div className="p-4 space-y-3">
             {section.tasks.map((task) => (
               <div key={task.id} className="flex items-center gap-3 group">
                 <Input
                   value={task.text}
-                  onChange={(e) => updateTask(section.id, task.id, { text: e.target.value })}
+                  onChange={(e) =>
+                    updateTask(section.id, task.id, { text: e.target.value })
+                  }
                   className={cn(
                     "flex-1 border-none focus-visible:ring-0 p-0 h-auto",
-                    task.completed && "line-through text-muted-foreground"
+                    task.completed && "line-through text-muted-foreground",
                   )}
                   placeholder="Task description..."
                 />
@@ -185,7 +197,7 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
                 </Button>
               </div>
             ))}
-            
+
             <Button
               variant="ghost"
               size="sm"

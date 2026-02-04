@@ -7,6 +7,7 @@ import {
   type ArtifactContent,
   type ArtifactStatus,
   type ArtifactType,
+  ExecErrorSchema,
   type OpenSpecChange,
   type OpenSpecCLIStatus,
   OpenSpecCLIStatusSchema,
@@ -111,10 +112,9 @@ export async function createChange(title: string): Promise<OpenSpecChange> {
   try {
     await execAsync(`"${openspecBin}" new change "${id}"`);
   } catch (error) {
-    if (error && typeof error === "object") {
-      const stderr = "stderr" in error ? String(error.stderr) : "";
-      const stdout = "stdout" in error ? String(error.stdout) : "";
-
+    const result = ExecErrorSchema.safeParse(error);
+    if (result.success) {
+      const { stdout = "", stderr = "" } = result.data;
       if (
         stderr.includes("already exists") ||
         stdout.includes("already exists")

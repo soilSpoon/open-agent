@@ -1,19 +1,28 @@
 "use client";
-import { MarkdownEditor } from "@/components/common/markdown-editor";
-import { TaskVisualEditor } from "@/components/pipeline/task-visual-editor";
-import { AlertCircle, FileCode, LayoutPanelLeft, Loader2, Play, Save, Sparkles } from "lucide-react";
+import {
+  AlertCircle,
+  FileCode,
+  LayoutPanelLeft,
+  Loader2,
+  Play,
+  Save,
+  Sparkles,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchSpecsList,
   fixArtifact,
   generateInstructions,
+  getActiveRunForChange,
   getOpenSpecChangeStatus,
   loadArtifact,
   startRalphRun,
   updateArtifact,
   validateOpenSpecChange,
 } from "@/app/actions";
+import { MarkdownEditor } from "@/components/common/markdown-editor";
+import { TaskVisualEditor } from "@/components/pipeline/task-visual-editor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,6 +57,7 @@ export function ChangeDetail({
   const [isValidating, setIsValidating] = useState(false);
   const [fixing, setFixing] = useState(false);
   const [cliStatus, setCliStatus] = useState<OpenSpecCLIStatus | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
   const [specFiles, setSpecFiles] = useState<SpecEntry[]>([]);
   const [selectedSpecFile, setSelectedSpecFile] = useState<string | null>(null);
@@ -63,12 +73,14 @@ export function ChangeDetail({
   const refreshStatus = useCallback(async () => {
     setIsValidating(true);
     try {
-      const [result, newStatus] = await Promise.all([
+      const [result, newStatus, activeRun] = await Promise.all([
         validateOpenSpecChange(change.id),
         getOpenSpecChangeStatus(change.id),
+        getActiveRunForChange(change.id),
       ]);
       setValidation(result);
       setCliStatus(newStatus);
+      setActiveRunId(activeRun?.id || null);
     } finally {
       setIsValidating(false);
     }
@@ -189,6 +201,10 @@ export function ChangeDetail({
   const handleRunRalph = async () => {
     setRunning(true);
     try {
+      if (activeRunId) {
+        router.push(`/runs/${activeRunId}`);
+        return;
+      }
       const runId = await startRalphRun(change.id);
       router.push(`/runs/${runId}`);
     } catch (error) {
@@ -256,7 +272,10 @@ export function ChangeDetail({
         }}
       />
 
-      {cliStatus && <PlannerStatus status={cliStatus} />}
+      <PlannerStatus
+        status={cliStatus}
+        isLoading={isValidating && !cliStatus}
+      />
 
       <PipelineView
         artifacts={change.artifacts}
@@ -359,16 +378,22 @@ export function ChangeDetail({
               </Button>
               {stage === "tasks" && (
                 <Button
-                  className="bg-blue-600 hover:bg-blue-700"
+                  className={cn(
+                    activeRunId
+                      ? "bg-green-600 hover:bg-green-700"
+                      : "bg-blue-600 hover:bg-blue-700",
+                  )}
                   onClick={handleRunRalph}
                   disabled={running}
                 >
                   {running ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : activeRunId ? (
+                    <Play className="mr-2 h-4 w-4" />
                   ) : (
                     <Play className="mr-2 h-4 w-4" />
                   )}
-                  Run Ralph
+                  {activeRunId ? `View Run #${activeRunId}` : "Run Ralph"}
                 </Button>
               )}
             </div>

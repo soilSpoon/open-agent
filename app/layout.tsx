@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { SettingsProvider } from "@/components/settings-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { WorkerInit } from "@/components/worker-init";
 
 export { metadata } from "./layout-metadata";
 
@@ -30,6 +31,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <SettingsProvider>
+            <WorkerInit />
             <div className="grid min-h-screen w-full lg:grid-cols-[280px_1fr]">
               <div className="hidden border-r bg-gray-100/40 lg:block dark:bg-gray-800/40">
                 <Sidebar />

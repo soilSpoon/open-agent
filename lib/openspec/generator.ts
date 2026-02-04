@@ -1,62 +1,69 @@
 "use server";
 import { exec, spawn } from "node:child_process";
-import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { getArtifactContent, saveArtifact } from "./service";
 import { getSpecsList } from "./specs-utils";
-import type { ArtifactType } from "./types";
+import { ExecErrorSchema } from "./types";
 
 const execAsync = promisify(exec);
 
-// Define types compatible with Amp CLI --stream-json output
-interface TextContent {
-  type: "text";
-  text: string;
-}
+// Define schemas for Amp CLI --stream-json output
+const TextContentSchema = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+});
 
-interface ToolUseContent {
-  type: "tool_use";
-  id: string;
-  name: string;
-  input: Record<string, string | number | boolean | null>;
-}
+const ToolUseContentSchema = z.object({
+  type: z.literal("tool_use"),
+  id: z.string(),
+  name: z.string(),
+  input: z.record(
+    z.string(),
+    z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  ),
+});
 
-interface AssistantMessage {
-  type: "assistant";
-  message: {
-    type: "message";
-    role: "assistant";
-    content: Array<TextContent | ToolUseContent>;
-  };
-}
+const AssistantMessageSchema = z.object({
+  type: z.literal("assistant"),
+  message: z.object({
+    type: z.literal("message"),
+    role: z.literal("assistant"),
+    content: z.array(z.union([TextContentSchema, ToolUseContentSchema])),
+  }),
+});
 
-interface ErrorResultMessage {
-  type: "result";
-  is_error: true;
-  error: string;
-}
+const ErrorResultMessageSchema = z.object({
+  type: z.literal("result"),
+  is_error: z.literal(true),
+  error: z.string(),
+});
+
+type AssistantMessage = z.infer<typeof AssistantMessageSchema>;
+type ErrorResultMessage = z.infer<typeof ErrorResultMessageSchema>;
+type TextContent = z.infer<typeof TextContentSchema>;
 
 function isAssistantMessage(msg: unknown): msg is AssistantMessage {
-  if (typeof msg !== "object" || msg === null) return false;
-  const m = msg as Record<string, string | number | boolean | object | null>;
-  return (
-    m.type === "assistant" &&
-    typeof m.message === "object" &&
-    m.message !== null &&
-    (m.message as Record<string, string | number | boolean | object | null>)
-      .type === "message"
-  );
+  return AssistantMessageSchema.safeParse(msg).success;
 }
 
 function isErrorMessage(msg: unknown): msg is ErrorResultMessage {
-  if (typeof msg !== "object" || msg === null) return false;
-  const m = msg as Record<string, string | number | boolean | object | null>;
-  return m.type === "result" && m.is_error === true;
+  return ErrorResultMessageSchema.safeParse(msg).success;
 }
 
 const ArtifactTypeSchema = z.enum(["proposal", "specs", "design", "tasks"]);
+
+const FixResponseSchema = z.object({
+  modifiedFiles: z.array(
+    z.object({
+      type: ArtifactTypeSchema,
+      filePath: z.string().optional(),
+      description: z.string().optional(),
+      content: z.string(),
+    }),
+  ),
+});
 
 async function getOpenSpecInstructions(
   changeId: string,
@@ -82,8 +89,12 @@ async function getOpenSpecInstructions(
     );
     return stdout;
   } catch (error) {
+    const result = ExecErrorSchema.safeParse(error);
+    const message = result.success
+      ? result.data.message || result.data.stderr || "Unknown error"
+      : "Failed to generate instructions from OpenSpec CLI";
     console.error("Failed to generate instructions:", error);
-    throw new Error("Failed to generate instructions from OpenSpec CLI");
+    throw new Error(message);
   }
 }
 
@@ -206,10 +217,18 @@ ${languageInstruction}
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON found in AI response");
 
-    const result = JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(jsonMatch[0]);
+    const validation = FixResponseSchema.safeParse(parsed);
+    if (!validation.success) {
+      throw new Error(
+        `Invalid AI response format: ${validation.error.message}`,
+      );
+    }
+
+    const { modifiedFiles: aiModifiedFiles } = validation.data;
     const modifiedFiles = [];
 
-    for (const file of result.modifiedFiles) {
+    for (const file of aiModifiedFiles) {
       await saveArtifact(changeId, file.type, file.content, file.filePath);
       modifiedFiles.push({
         type: file.type,
@@ -253,7 +272,7 @@ async function runAmp(prompt: string): Promise<string> {
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            const msg = JSON.parse(line);
+            const msg: unknown = JSON.parse(line);
             if (isAssistantMessage(msg)) {
               const textParts = msg.message.content
                 .filter((c): c is TextContent => c.type === "text")

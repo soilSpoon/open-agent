@@ -16,7 +16,6 @@ export default async function Page({
           <h1 className="text-2xl font-bold tracking-tight">{change.title}</h1>
           <p className="text-muted-foreground">Managed by OpenSpec</p>
         </div>
-        <div className="text-sm text-muted-foreground">ID: {change.id}</div>
       </div>
       <ChangeDetail change={change} changeId={id} />
     </div>

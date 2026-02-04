@@ -1,16 +1,20 @@
 import { Activity, CheckCircle, FileText, Play } from "lucide-react";
 import Link from "next/link";
-import { getActiveRuns } from "@/app/actions";
+import { getActiveRuns, getDashboardStats, getRuns } from "@/app/actions";
 import { ChangeActions } from "@/components/dashboard/change-actions";
 import { NewChangeButton } from "@/components/dashboard/new-change-button";
 import { RunActions } from "@/components/dashboard/run-actions";
+import { RunLink } from "@/components/dashboard/run-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getChanges } from "@/lib/openspec/service";
+import { cn } from "@/lib/utils";
 
 export default async function Dashboard() {
-  const [changes, activeRuns] = await Promise.all([
+  const [changes, activeRuns, allRuns, stats] = await Promise.all([
     getChanges(),
     getActiveRuns(),
+    getRuns(),
+    getDashboardStats(),
   ]);
 
   return (
@@ -40,7 +44,7 @@ export default async function Dashboard() {
             <Play className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{activeRuns.length}</div>
+            <div className="text-2xl font-bold">{stats.activeRuns}</div>
             <p className="text-xs text-gray-500">Running now</p>
           </CardContent>
         </Card>
@@ -52,8 +56,8 @@ export default async function Dashboard() {
             <CheckCircle className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">156</div>
-            <p className="text-xs text-green-600">+12% from last week</p>
+            <div className="text-2xl font-bold">{stats.completedTasks}</div>
+            <p className="text-xs text-gray-500">All time</p>
           </CardContent>
         </Card>
         <Card>
@@ -62,8 +66,8 @@ export default async function Dashboard() {
             <Activity className="h-4 w-4 text-gray-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">94.2%</div>
-            <p className="text-xs text-red-500">-2% from last week</p>
+            <div className="text-2xl font-bold">{stats.successRate}%</div>
+            <p className="text-xs text-gray-500">Overall performance</p>
           </CardContent>
         </Card>
       </div>
@@ -101,8 +105,6 @@ export default async function Dashboard() {
                         <div>
                           <p className="font-medium text-lg">{change.title}</p>
                           <div className="flex items-center gap-2 text-sm text-gray-500">
-                            <span>ID: {change.id}</span>
-                            <span>•</span>
                             <span>
                               Updated{" "}
                               {new Date(change.updatedAt).toLocaleDateString()}
@@ -110,10 +112,7 @@ export default async function Dashboard() {
                             {runForChange && (
                               <>
                                 <span>•</span>
-                                <span className="text-blue-600 font-medium flex items-center gap-1">
-                                  <Play className="h-3 w-3" />
-                                  Run #{runForChange.id}
-                                </span>
+                                <RunLink runId={runForChange.id} />
                               </>
                             )}
                           </div>
@@ -152,16 +151,16 @@ export default async function Dashboard() {
         {/* Active Ralph Runs (Right 3 cols) */}
         <Card className="col-span-3">
           <CardHeader>
-            <CardTitle>Active Ralph Runs</CardTitle>
+            <CardTitle>Ralph Runs</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {activeRuns.length === 0 ? (
+              {allRuns.length === 0 ? (
                 <div className="text-center text-gray-500 py-4">
-                  No active runs.
+                  No runs yet.
                 </div>
               ) : (
-                activeRuns.map((run) => (
+                allRuns.map((run) => (
                   <div
                     key={run.id}
                     className="flex items-center justify-between border-b pb-4 last:border-0 last:pb-0"
@@ -188,10 +187,22 @@ export default async function Dashboard() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 border-transparent bg-blue-100 text-blue-800">
-                        Running
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 border-transparent",
+                          run.status === "running"
+                            ? "bg-blue-100 text-blue-800"
+                            : run.status === "completed"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-gray-100 text-gray-800",
+                        )}
+                      >
+                        {run.status.charAt(0).toUpperCase() +
+                          run.status.slice(1)}
                       </span>
-                      <RunActions runId={run.id} />
+                      {run.status === "running" && (
+                        <RunActions runId={run.id} />
+                      )}
                     </div>
                   </div>
                 ))

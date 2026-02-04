@@ -2,6 +2,7 @@
 import { exec } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
+import { ExecErrorSchema } from "./types";
 
 const execAsync = promisify(exec);
 
@@ -24,23 +25,15 @@ export async function validateChange(
     // We expect this to fail if invalid, so we catch the error
     await execAsync(`"${openspecBin}" validate "${changeId}"`);
     return { valid: true, errors: [] };
-  } catch (error) {
+  } catch (error: unknown) {
     let output = "";
-    if (error && typeof error === "object") {
-      if ("stdout" in error && typeof error.stdout === "string") {
-        output += error.stdout;
-      }
-      if ("stderr" in error && typeof error.stderr === "string") {
-        output += error.stderr;
-      }
-      if (
-        output === "" &&
-        "message" in error &&
-        typeof error.message === "string"
-      ) {
-        output = error.message;
-      }
+    const result = ExecErrorSchema.safeParse(error);
+
+    if (result.success) {
+      const { stdout = "", stderr = "", message = "" } = result.data;
+      output = stdout || stderr || message;
     }
+
     // Simple parsing of lines that look like errors
     // We want to extract the meaningful error message, removing stack traces or redundant info
     const lines = output.toString().split("\n");
