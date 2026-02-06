@@ -118,7 +118,8 @@ export async function generateArtifactInstructions(
   }
 
   if (artifactStatus.status === "blocked") {
-    const deps = artifactStatus.missingDeps?.join(", ") || "unknown dependencies";
+    const deps =
+      artifactStatus.missingDeps?.join(", ") || "unknown dependencies";
     throw new Error(
       `Artifact ${artifactType} is blocked by: ${deps}. Please complete them first.`,
     );

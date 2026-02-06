@@ -21,12 +21,14 @@ export default async function Dashboard() {
   return (
     <ProjectDashboard>
       <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+            Dashboard
+          </h1>
           <NewChangeButton />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
@@ -77,8 +79,8 @@ export default async function Dashboard() {
           </Card>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-          <Card className="col-span-4">
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-7">
+          <Card className="col-span-full lg:col-span-4">
             <CardHeader>
               <CardTitle>Recent Changes</CardTitle>
             </CardHeader>
@@ -98,14 +100,14 @@ export default async function Dashboard() {
                       <Link
                         key={change.id}
                         href={`/changes/${change.id}`}
-                        className="group flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors relative"
+                        className="group flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors relative gap-4"
                       >
                         <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                          <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                             <FileText className="h-5 w-5" />
                           </div>
                           <div>
-                            <p className="font-medium text-lg">
+                            <p className="font-medium text-lg leading-tight">
                               {change.title}
                             </p>
                             <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -124,7 +126,7 @@ export default async function Dashboard() {
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center justify-between sm:justify-end gap-4">
                           <div className="text-right text-sm text-gray-500">
                             {
                               Object.values(change.artifacts).filter(
@@ -142,7 +144,7 @@ export default async function Dashboard() {
                           >
                             {change.status}
                           </div>
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                             <ChangeActions
                               id={change.id}
                               title={change.title}
@@ -157,7 +159,7 @@ export default async function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="col-span-3">
+          <Card className="col-span-full lg:col-span-3">
             <CardHeader>
               <CardTitle>Ralph Runs</CardTitle>
             </CardHeader>

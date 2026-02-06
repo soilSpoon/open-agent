@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { getRun, stopRalphRun } from "@/app/actions";
 import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import {
   Card,
   CardContent,
@@ -64,7 +65,7 @@ export function RunMonitor({ runId }: { runId: string }) {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [run?.logs]);
+  }, []);
 
   if (loading) {
     return (
@@ -93,30 +94,32 @@ export function RunMonitor({ runId }: { runId: string }) {
   return (
     <div className="flex flex-col gap-6 animate-in fade-in duration-700">
       {/* Status Header */}
-      <div className="flex items-center justify-between bg-muted/30 border p-4 rounded-2xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-muted/30 border p-4 rounded-2xl">
         <div className="flex items-center gap-4">
           <div
             className={cn(
-              "h-12 w-12 rounded-xl flex items-center justify-center shadow-sm",
+              "h-10 w-10 md:h-12 md:w-12 rounded-xl flex items-center justify-center shadow-sm",
               isRunning
                 ? "bg-blue-500/10 text-blue-500 animate-pulse"
                 : "bg-muted text-muted-foreground",
             )}
           >
             {isRunning ? (
-              <Zap className="h-6 w-6" />
+              <Zap className="h-5 w-5 md:h-6 md:w-6" />
             ) : (
-              <Clock className="h-6 w-6" />
+              <Clock className="h-5 w-5 md:h-6 md:w-6" />
             )}
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold">Ralph is {run.status}</h2>
-              <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+              <h2 className="text-base md:text-lg font-bold truncate max-w-[200px] md:max-w-none">
+                Ralph is {run.status}
+              </h2>
+              <span className="text-[10px] md:text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                 #{run.id}
               </span>
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs md:text-sm text-muted-foreground truncate max-w-[250px] md:max-w-none">
               {activeTask
                 ? `Currently processing: ${activeTask.title}`
                 : "System idle"}
@@ -128,42 +131,42 @@ export function RunMonitor({ runId }: { runId: string }) {
             variant="destructive"
             size="sm"
             onClick={() => stopRalphRun(runId)}
-            className="gap-2"
+            className="gap-2 w-full md:w-auto justify-center"
           >
             <Square className="h-3.5 w-3.5 fill-current" /> Stop Loop
           </Button>
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-12">
+      <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-12">
         {/* Left: Execution Monitor */}
-        <div className="lg:col-span-8 space-y-6">
+        <div className="md:col-span-1 lg:col-span-8 space-y-6">
           {/* Terminal */}
           <Card className="border-0 bg-zinc-950 shadow-2xl overflow-hidden rounded-2xl ring-1 ring-white/10">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 bg-zinc-900/50 px-4 py-3 border-b border-white/5">
               <div className="flex items-center gap-2">
-                <div className="flex gap-1.5 pr-2">
+                <div className="hidden sm:flex gap-1.5 pr-2">
                   <div className="h-2.5 w-2.5 rounded-full bg-red-500/50" />
                   <div className="h-2.5 w-2.5 rounded-full bg-yellow-500/50" />
                   <div className="h-2.5 w-2.5 rounded-full bg-green-500/50" />
                 </div>
-                <CardTitle className="text-xs font-mono text-zinc-400 flex items-center gap-2">
+                <CardTitle className="text-[10px] md:text-xs font-mono text-zinc-400 flex items-center gap-2">
                   <Terminal className="h-3.5 w-3.5" />
                   ralph_executor --verbose
                 </CardTitle>
               </div>
-              <div className="text-[10px] font-mono text-zinc-500 tracking-tighter">
+              <div className="text-[9px] md:text-[10px] font-mono text-zinc-500 tracking-tighter">
                 {new Date().toLocaleTimeString()}
               </div>
             </CardHeader>
             <CardContent className="p-0">
               <div
                 ref={scrollRef}
-                className="h-[500px] overflow-y-auto p-4 font-mono text-[13px] leading-relaxed selection:bg-blue-500/30"
+                className="h-[400px] md:h-[500px] overflow-y-auto p-4 font-mono text-[11px] md:text-[13px] leading-relaxed selection:bg-blue-500/30"
               >
                 {run.logs.map((log) => (
-                  <div key={log.id} className="flex gap-3 mb-1 group">
-                    <span className="text-zinc-600 shrink-0 text-[11px] pt-0.5 w-16">
+                  <div key={log.id} className="flex gap-2 md:gap-3 mb-1 group">
+                    <span className="text-zinc-600 shrink-0 text-[9px] md:text-[11px] pt-0.5 w-12 md:w-16">
                       {new Date(log.timestamp).toLocaleTimeString([], {
                         hour12: false,
                       })}
@@ -184,14 +187,12 @@ export function RunMonitor({ runId }: { runId: string }) {
                 ))}
                 {isRunning && (
                   <div className="flex gap-3 items-center">
-                    <span className="text-zinc-600 shrink-0 text-[11px] w-16">
+                    <span className="text-zinc-600 shrink-0 text-[11px] w-12 md:w-16">
                       {new Date().toLocaleTimeString([], { hour12: false })}
                     </span>
                     <div className="flex items-center gap-2 text-blue-400">
                       <Loader2 className="h-3 w-3 animate-spin" />
-                      <span className="animate-pulse">
-                        Listening for updates...
-                      </span>
+                      <span className="animate-pulse">Listening...</span>
                     </div>
                   </div>
                 )}
@@ -200,7 +201,7 @@ export function RunMonitor({ runId }: { runId: string }) {
           </Card>
 
           {/* Tasks Progress */}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
             {run.tasks.map((task) => (
               <div
                 key={task.id}
@@ -265,9 +266,9 @@ export function RunMonitor({ runId }: { runId: string }) {
                 </div>
                 <div className="space-y-2">
                   {patterns.length > 0 ? (
-                    patterns.map((p, i) => (
+                    patterns.map((p) => (
                       <div
-                        key={i}
+                        key={p}
                         className="text-xs bg-muted/50 p-2 rounded-lg border border-primary/5 flex gap-2"
                       >
                         <ChevronRight className="h-3 w-3 mt-0.5 text-primary shrink-0" />
@@ -290,9 +291,9 @@ export function RunMonitor({ runId }: { runId: string }) {
                 </div>
                 <div className="space-y-2">
                   {gotchas.length > 0 ? (
-                    gotchas.map((g, i) => (
+                    gotchas.map((g) => (
                       <div
-                        key={i}
+                        key={g}
                         className="text-xs bg-red-500/5 p-2 rounded-lg border border-red-500/10 text-red-700 dark:text-red-400 flex gap-2"
                       >
                         <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
@@ -311,27 +312,23 @@ export function RunMonitor({ runId }: { runId: string }) {
 
           {/* Quick Links */}
           <div className="space-y-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full h-9 p-0"
-              asChild
+            <a
+              href={`https://ampcode.com/threads/${
+                run.logs
+                  .find((l) => l.message.includes("threadId"))
+                  ?.message.split(":")
+                  .pop() || ""
+              }`}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(
+                buttonVariants({ variant: "outline", size: "sm" }),
+                "flex items-center justify-between w-full h-9 px-3 text-xs font-medium",
+              )}
             >
-              <a
-                href={`https://ampcode.com/threads/${
-                  run.logs
-                    .find((l) => l.message.includes("threadId"))
-                    ?.message.split(":")
-                    .pop() || ""
-                }`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center justify-between w-full px-3 text-xs font-medium"
-              >
-                <span className="truncate mr-2">View Active Amp Thread</span>
-                <ExternalLink className="h-3.5 w-3.5 opacity-60 shrink-0" />
-              </a>
-            </Button>
+              <span className="truncate mr-2">View Active Amp Thread</span>
+              <ExternalLink className="h-3.5 w-3.5 opacity-60 shrink-0" />
+            </a>
             <Button
               variant="ghost"
               size="sm"

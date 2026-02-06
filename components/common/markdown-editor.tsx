@@ -42,9 +42,9 @@ const theme = {
     listitem: "mb-1",
   },
   heading: {
-    h1: "text-2xl font-bold mb-4",
-    h2: "text-xl font-bold mb-3",
-    h3: "text-lg font-bold mb-2",
+    h1: "text-2xl font-bold mb-4 md:text-2xl text-xl",
+    h2: "text-xl font-bold mb-3 md:text-xl text-lg",
+    h3: "text-lg font-bold mb-2 md:text-lg text-base",
   },
   code: "bg-muted p-1 rounded font-mono text-sm",
   quote: "border-l-4 border-primary pl-4 italic bg-muted/30 py-1",
@@ -124,14 +124,14 @@ export function MarkdownEditor({
           contentEditable={
             <ContentEditable
               className={cn(
-                "outline-none flex-1 p-4 min-h-[400px]",
+                "outline-none flex-1 p-4 min-h-[400px] text-base md:text-sm",
                 type === "tasks" && "font-sans",
-                type === "specs" && "font-mono text-sm",
+                type === "specs" && "font-mono",
               )}
             />
           }
           placeholder={
-            <div className="absolute top-4 left-4 text-muted-foreground pointer-events-none text-sm">
+            <div className="absolute top-4 left-4 text-muted-foreground pointer-events-none text-base md:text-sm">
               {placeholder}
             </div>
           }

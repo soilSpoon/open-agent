@@ -87,13 +87,12 @@ export function ValidationStatus({
     }
   };
 
-  const errorCount = validation?.errors?.length || 0;
-  
+  const _errorCount = validation?.errors?.length || 0;
+
   // Filter out "No deltas found" error as it's common during initial drafting
-  const filteredErrors = validation?.errors?.filter(err => 
-    !err.includes("No deltas found")
-  ) || [];
-  
+  const filteredErrors =
+    validation?.errors?.filter((err) => !err.includes("No deltas found")) || [];
+
   const isEffectiveValid = validation?.valid || filteredErrors.length === 0;
   const effectiveErrorCount = filteredErrors.length;
 
@@ -109,12 +108,14 @@ export function ValidationStatus({
           </div>
           <div className="flex-1">
             <h3 className="font-semibold text-green-800">
-              {stage === "proposal" && validation?.errors?.some(e => e.includes("No deltas found")) 
-                ? "Proposal in Progress" 
+              {stage === "proposal" &&
+              validation?.errors?.some((e) => e.includes("No deltas found"))
+                ? "Proposal in Progress"
                 : "All Valid"}
             </h3>
             <p className="text-sm text-green-700">
-              {stage === "proposal" && validation?.errors?.some(e => e.includes("No deltas found"))
+              {stage === "proposal" &&
+              validation?.errors?.some((e) => e.includes("No deltas found"))
                 ? "Syntactic validation passed. Ready to define specs next."
                 : "Change is valid and ready for next steps."}
             </p>
@@ -187,7 +188,8 @@ export function ValidationStatus({
                       {!isOpen && (
                         <p className="text-sm text-destructive/80 truncate">
                           {filteredErrors[0]}
-                          {effectiveErrorCount > 1 && ` (+${effectiveErrorCount - 1} more)`}
+                          {effectiveErrorCount > 1 &&
+                            ` (+${effectiveErrorCount - 1} more)`}
                         </p>
                       )}
                     </div>

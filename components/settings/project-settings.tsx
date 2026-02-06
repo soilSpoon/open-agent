@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CheckCircle2,
   Folder,
   Pencil,
   Plus,
@@ -12,7 +11,13 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
+import {
+  createProject,
+  deleteProject,
+  getProjects,
+  updateProject,
+} from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -35,24 +40,71 @@ export function ProjectSettings() {
     name: "",
     path: "",
     checkCommand: "bun run check",
+    preCheckCommand: "",
   });
   const [editForm, setEditForm] = useState<Partial<ProjectConfig>>({});
 
-  useEffect(() => {
-    const saved = localStorage.getItem("open-agent-projects");
-    if (saved) {
-      try {
-        setProjects(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse projects", e);
-      }
-    }
+  const nameId = useId();
+  const pathId = useId();
+  const cmdId = useId();
+  const preCmdId = useId();
+
+  const editNameId = useId();
+  const editPathId = useId();
+  const editCmdId = useId();
+  const editPreCmdId = useId();
+
+  const loadProjects = useCallback(async () => {
+    const dbProjects = await getProjects();
+    setProjects(
+      dbProjects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        path: p.path,
+        checkCommand: p.checkCommand ?? undefined,
+        preCheckCommand: p.preCheckCommand ?? undefined,
+      })),
+    );
   }, []);
 
-  const saveProjects = (updated: ProjectConfig[]) => {
-    setProjects(updated);
-    localStorage.setItem("open-agent-projects", JSON.stringify(updated));
-  };
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
+
+  // Migration: Move existing localStorage projects to DB
+  useEffect(() => {
+    const migrateLocalStorage = async () => {
+      const saved = localStorage.getItem("open-agent-projects");
+      if (saved) {
+        try {
+          const localProjects: ProjectConfig[] = JSON.parse(saved);
+          const existingProjects = await getProjects();
+
+          for (const localProject of localProjects) {
+            const exists = existingProjects.some(
+              (p) => p.path === localProject.path,
+            );
+            if (!exists) {
+              await createProject(
+                localProject.name,
+                localProject.path,
+                localProject.checkCommand,
+                localProject.preCheckCommand,
+              );
+            }
+          }
+
+          localStorage.removeItem("open-agent-projects");
+          localStorage.removeItem("open-agent-active-project");
+          await loadProjects();
+        } catch (e) {
+          console.error("Failed to migrate projects", e);
+        }
+      }
+    };
+
+    migrateLocalStorage();
+  }, [loadProjects]);
 
   const handleSelectProject = (id: string) => {
     if (editingId) return; // Don't redirect while editing
@@ -60,18 +112,23 @@ export function ProjectSettings() {
     router.push("/");
   };
 
-  const handleAddProject = () => {
+  const handleAddProject = async () => {
     if (!newProject.name || !newProject.path) return;
 
-    const project: ProjectConfig = {
-      id: Math.random().toString(36).substring(7),
-      name: newProject.name,
-      path: newProject.path,
-      checkCommand: newProject.checkCommand || "bun run check",
-    };
+    await createProject(
+      newProject.name,
+      newProject.path,
+      newProject.checkCommand || undefined,
+      newProject.preCheckCommand || undefined,
+    );
 
-    saveProjects([...projects, project]);
-    setNewProject({ name: "", path: "", checkCommand: "bun run check" });
+    await loadProjects();
+    setNewProject({
+      name: "",
+      path: "",
+      checkCommand: "bun run check",
+      preCheckCommand: "",
+    });
     setIsAdding(false);
   };
 
@@ -81,20 +138,25 @@ export function ProjectSettings() {
     setEditForm(project);
   };
 
-  const handleSaveEdit = (e: React.MouseEvent) => {
+  const handleSaveEdit = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!editForm.name || !editForm.path) return;
+    if (!editForm.name || !editForm.path || !editingId) return;
 
-    const updated = projects.map((p) =>
-      p.id === editingId ? ({ ...p, ...editForm } as ProjectConfig) : p,
-    );
-    saveProjects(updated);
+    await updateProject(editingId, {
+      name: editForm.name,
+      path: editForm.path,
+      checkCommand: editForm.checkCommand,
+      preCheckCommand: editForm.preCheckCommand,
+    });
+
+    await loadProjects();
     setEditingId(null);
   };
 
-  const removeProject = (id: string, e: React.MouseEvent) => {
+  const removeProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    saveProjects(projects.filter((p) => p.id !== id));
+    await deleteProject(id);
+    await loadProjects();
   };
 
   return (
@@ -132,9 +194,9 @@ export function ProjectSettings() {
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="name">Project Name</Label>
+              <Label htmlFor={nameId}>Project Name</Label>
               <Input
-                id="name"
+                id={nameId}
                 placeholder="Open Agent"
                 value={newProject.name}
                 onChange={(e) =>
@@ -143,9 +205,9 @@ export function ProjectSettings() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="path">Root Path (Absolute)</Label>
+              <Label htmlFor={pathId}>Root Path (Absolute)</Label>
               <Input
-                id="path"
+                id={pathId}
                 placeholder="/home/user/dev/project"
                 value={newProject.path}
                 onChange={(e) =>
@@ -154,11 +216,11 @@ export function ProjectSettings() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="cmd">Quality Check Command</Label>
+              <Label htmlFor={cmdId}>Quality Check Command</Label>
               <div className="relative">
                 <Terminal className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  id="cmd"
+                  id={cmdId}
                   className="pl-9"
                   placeholder="bun run check"
                   value={newProject.checkCommand}
@@ -166,6 +228,24 @@ export function ProjectSettings() {
                     setNewProject({
                       ...newProject,
                       checkCommand: e.target.value,
+                    })
+                  }
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor={preCmdId}>Pre-Check Command (Optional)</Label>
+              <div className="relative">
+                <Settings2 className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id={preCmdId}
+                  className="pl-9"
+                  placeholder="e.g. bun run lint"
+                  value={newProject.preCheckCommand}
+                  onChange={(e) =>
+                    setNewProject({
+                      ...newProject,
+                      preCheckCommand: e.target.value,
                     })
                   }
                 />
@@ -194,13 +274,13 @@ export function ProjectSettings() {
                     <div className="space-y-3 pr-4">
                       <div className="grid gap-1.5">
                         <Label
-                          htmlFor="edit-name"
+                          htmlFor={editNameId}
                           className="text-[10px] uppercase text-muted-foreground font-bold"
                         >
                           Name
                         </Label>
                         <Input
-                          id="edit-name"
+                          id={editNameId}
                           size={1}
                           className="h-8 text-sm"
                           value={editForm.name}
@@ -212,13 +292,13 @@ export function ProjectSettings() {
                       </div>
                       <div className="grid gap-1.5">
                         <Label
-                          htmlFor="edit-path"
+                          htmlFor={editPathId}
                           className="text-[10px] uppercase text-muted-foreground font-bold"
                         >
                           Path
                         </Label>
                         <Input
-                          id="edit-path"
+                          id={editPathId}
                           size={1}
                           className="h-8 text-sm font-mono"
                           value={editForm.path}
@@ -291,13 +371,13 @@ export function ProjectSettings() {
               {editingId === project.id ? (
                 <div className="grid gap-1.5 pt-1">
                   <Label
-                    htmlFor="edit-cmd"
+                    htmlFor={editCmdId}
                     className="text-[10px] uppercase text-muted-foreground font-bold"
                   >
                     Check Command
                   </Label>
                   <Input
-                    id="edit-cmd"
+                    id={editCmdId}
                     className="h-8 text-xs font-mono"
                     value={editForm.checkCommand}
                     onClick={(e) => e.stopPropagation()}
@@ -305,13 +385,43 @@ export function ProjectSettings() {
                       setEditForm({ ...editForm, checkCommand: e.target.value })
                     }
                   />
+                  <div className="grid gap-1.5 pt-1">
+                    <Label
+                      htmlFor={editPreCmdId}
+                      className="text-[10px] uppercase text-muted-foreground font-bold"
+                    >
+                      Pre-Check Command
+                    </Label>
+                    <Input
+                      id={editPreCmdId}
+                      className="h-8 text-xs font-mono"
+                      value={editForm.preCheckCommand}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) =>
+                        setEditForm({
+                          ...editForm,
+                          preCheckCommand: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Terminal className="h-3.5 w-3.5" />
-                  <code className="bg-muted px-1.5 py-0.5 rounded">
-                    {project.checkCommand}
-                  </code>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Terminal className="h-3.5 w-3.5" />
+                    <code className="bg-muted px-1.5 py-0.5 rounded">
+                      {project.checkCommand}
+                    </code>
+                  </div>
+                  {project.preCheckCommand && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground opacity-70">
+                      <Settings2 className="h-3.5 w-3.5" />
+                      <code className="bg-muted px-1.5 py-0.5 rounded">
+                        {project.preCheckCommand}
+                      </code>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

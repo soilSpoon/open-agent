@@ -4,8 +4,6 @@ import {
   ArrowRight,
   Folder,
   LayoutDashboard,
-  Plus,
-  RefreshCw,
   Settings2,
   Terminal,
 } from "lucide-react";
@@ -13,18 +11,10 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import type { ProjectConfig } from "@/lib/openspec/types";
 
@@ -51,9 +41,10 @@ export function ProjectDashboard({ children }: { children: React.ReactNode }) {
     setIsLoaded(true);
   }, []);
 
-  const handleProjectChange = (id: string) => {
-    setSelectedId(id);
-    localStorage.setItem("open-agent-active-project", id);
+  const handleProjectChange = (value: string | null) => {
+    if (!value) return;
+    setSelectedId(value);
+    localStorage.setItem("open-agent-active-project", value);
     // In a real app, we might need to refresh data based on the new project path
     // For now, we'll reload the page to ensure all server actions use the new context
     window.location.reload();
@@ -65,7 +56,7 @@ export function ProjectDashboard({ children }: { children: React.ReactNode }) {
 
   if (projects.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8 animate-in fade-in duration-700">
+      <div className="flex flex-col items-center justify-center min-h-[60svh] space-y-8 animate-in fade-in duration-700">
         <div className="relative">
           <div className="absolute -inset-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full opacity-20 blur-xl animate-pulse" />
           <LayoutDashboard className="h-20 w-20 text-primary relative" />

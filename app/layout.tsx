@@ -1,7 +1,9 @@
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Header } from "@/components/layout/header";
+import { MobileHeader } from "@/components/layout/mobile-header";
 import { Sidebar } from "@/components/layout/sidebar";
+import { SidebarProvider } from "@/components/layout/sidebar-provider";
 import { SettingsProvider } from "@/components/settings-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { WorkerInit } from "@/components/worker-init";
@@ -31,18 +33,21 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <SettingsProvider>
-            <WorkerInit />
-            <div className="grid min-h-screen w-full lg:grid-cols-[280px_1fr]">
-              <div className="hidden border-r bg-gray-100/40 lg:block dark:bg-gray-800/40">
-                <Sidebar />
+            <SidebarProvider>
+              <WorkerInit />
+              <div className="grid min-h-svh w-full lg:grid-cols-[280px_1fr]">
+                <div className="hidden border-r bg-muted/40 lg:block">
+                  <Sidebar className="flex" />
+                </div>
+                <div className="flex flex-col">
+                  <MobileHeader />
+                  <Header />
+                  <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6 bg-background">
+                    {children}
+                  </main>
+                </div>
               </div>
-              <div className="flex flex-col">
-                <Header />
-                <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6 bg-background">
-                  {children}
-                </main>
-              </div>
-            </div>
+            </SidebarProvider>
           </SettingsProvider>
         </ThemeProvider>
       </body>

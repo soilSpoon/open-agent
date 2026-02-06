@@ -1,7 +1,8 @@
-import { exec, spawn } from "node:child_process";
+import { exec } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import * as pty from "node-pty";
 import { z } from "zod";
 import type { ProjectConfig } from "./types";
 
@@ -15,6 +16,7 @@ export interface RalphCallbacks {
   onTaskStart: (taskId: string, title: string) => Promise<void>;
   onTaskComplete: (taskId: string, success: boolean) => Promise<void>;
   onRunComplete: (success: boolean, message: string) => Promise<void>;
+  onIterationComplete: (iteration: number) => Promise<void>;
 }
 
 /**
@@ -42,6 +44,16 @@ export const ApplyInstructionsSchema = z.object({
 
 export type ApplyInstructions = z.infer<typeof ApplyInstructionsSchema>;
 
+export interface RalphIterationLog {
+  threadId?: string;
+  task: string;
+  implemented: string[];
+  codebasePatterns: string[];
+  gotchas: string[];
+  summary?: string;
+  complete?: boolean;
+}
+
 /**
  * Ralph Agent for OpenSpec
  * Autonomous loop that implements tasks from OpenSpec with iteration memory
@@ -53,6 +65,7 @@ export class Ralph {
   private progressFile: string;
   private changeFile: string;
   private callbacks: RalphCallbacks;
+  private currentIteration: number;
 
   constructor(
     config: ProjectConfig,
@@ -64,6 +77,7 @@ export class Ralph {
     this.changeId = changeId;
     this.callbacks = callbacks;
     this.maxIterations = maxIterations;
+    this.currentIteration = 1;
 
     const changeBasePath = path.join(
       config.path,
@@ -129,7 +143,10 @@ export class Ralph {
   /**
    * Append structured log to progress.txt
    */
-  private async appendProgress(structuredLog: any, rawSummary: string) {
+  private async appendProgress(
+    structuredLog: RalphIterationLog,
+    rawSummary: string,
+  ) {
     const threadUrl = structuredLog.threadId
       ? `https://ampcode.com/threads/${structuredLog.threadId}`
       : "Unknown";
@@ -140,11 +157,11 @@ export class Ralph {
 - **Thread**: ${threadUrl}
 - **Task**: ${structuredLog.task || "N/A"}
 - **Implemented**: ${(structuredLog.implemented || []).join(", ")}
-- **Patterns Discovered**: ${(structuredLog.codebasePatterns || []).join(", ")}
-- **Gotchas**: ${(structuredLog.gotchas || []).join(", ")}
+- **Insights & Patterns**: ${(structuredLog.codebasePatterns || []).join(", ")}
+- **Root Cause & Resolution**: ${(structuredLog.gotchas || []).join(", ")}
 
-### Summary
-${rawSummary}
+### Synthesis
+${structuredLog.summary || rawSummary}
 `;
     await fs.appendFile(this.progressFile, entry, "utf-8");
   }
@@ -152,17 +169,20 @@ ${rawSummary}
   /**
    * Extract JSON log from agent output
    */
-  private parseIterationLog(output: string): { structured: any; raw: string } {
+  private parseIterationLog(output: string): {
+    structured: RalphIterationLog;
+    raw: string;
+  } {
     const sentinelRegex =
       /<RALPH_ITERATION_LOG_JSON>([\s\S]*?)<\/RALPH_ITERATION_LOG_JSON>/;
     const match = output.match(sentinelRegex);
 
-    if (match && match[1]) {
+    if (match?.[1]) {
       try {
         const structured = JSON.parse(match[1].trim());
         const raw = output.replace(sentinelRegex, "").slice(-1000).trim();
         return { structured, raw };
-      } catch (e) {
+      } catch (_e) {
         console.error("Failed to parse agent's JSON log.");
       }
     }
@@ -189,6 +209,10 @@ ${rawSummary}
     return ApplyInstructionsSchema.parse(JSON.parse(stdout));
   }
 
+  public setStartIteration(iteration: number) {
+    this.currentIteration = iteration;
+  }
+
   /**
    * Run the autonomous loop
    */
@@ -198,8 +222,27 @@ ${rawSummary}
       `Starting Ralph for change: ${this.changeId} in project: ${this.config.name}`,
     );
 
-    for (let i = 1; i <= this.maxIterations; i++) {
+    for (let i = this.currentIteration; i <= this.maxIterations; i++) {
       await this.log("info", `--- Iteration ${i} / ${this.maxIterations} ---`);
+      await this.callbacks.onIterationComplete(i);
+
+      // 0. Optional Pre-check before task execution
+      if (this.config.preCheckCommand) {
+        await this.log(
+          "info",
+          `Running pre-check: ${this.config.preCheckCommand}`,
+        );
+        try {
+          await execAsync(this.config.preCheckCommand, {
+            cwd: this.config.path,
+          });
+          await this.log("info", "Pre-check passed.");
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await this.log("warn", `Pre-check failed: ${msg}`);
+          // We continue anyway, as the agent might fix the issues
+        }
+      }
 
       const status = await this.getStatus();
 
@@ -257,10 +300,41 @@ ${rawSummary}
 
         await this.log(
           "info",
-          `Running quality checks (${this.config.checkCommand}) and OpenSpec validation...`,
+          "Running targeted quality checks and OpenSpec validation...",
         );
         try {
-          await execAsync(this.config.checkCommand, { cwd: this.config.path });
+          // 1. Only check modified files to avoid noise from existing codebase errors
+          const { stdout: changedFiles } = await execAsync(
+            "git diff --name-only",
+            { cwd: this.config.path },
+          );
+
+          if (this.config.checkCommand && changedFiles.trim()) {
+            const files = changedFiles
+              .split("\n")
+              .filter(
+                (f) => f.trim() && (f.endsWith(".ts") || f.endsWith(".tsx")),
+              );
+            if (files.length > 0) {
+              // Use the configured check command but targeted at specific files if possible
+              try {
+                // Infer the tool (biome, eslint, etc.) from checkCommand or use it as base
+                const baseCmd = this.config.checkCommand.includes("biome")
+                  ? "biome check --write --unsafe"
+                  : this.config.checkCommand;
+
+                await execAsync(`${baseCmd} ${files.join(" ")}`, {
+                  cwd: this.config.path,
+                });
+              } catch {
+                // Fallback to full check if targeted check is not supported
+                await execAsync(this.config.checkCommand, {
+                  cwd: this.config.path,
+                });
+              }
+            }
+          }
+
           await execAsync(
             `"${this.getOpenspecBin()}" validate "${this.changeId}"`,
             { cwd: this.config.path },
@@ -281,15 +355,36 @@ ${rawSummary}
             checkError instanceof Error
               ? checkError.message
               : String(checkError);
-          await this.log("error", `Validation failed: ${msg}`);
-          const { structured, raw } = this.parseIterationLog(response);
-          await this.appendProgress(
-            {
-              ...structured,
-              gotchas: [...(structured.gotchas || []), msg],
-            },
-            `Validation failed: ${msg}\n\n${raw}`,
+
+          await this.log(
+            "error",
+            "Task failed validation. Requesting agent analysis...",
           );
+
+          // Request a synthesized analysis from the agent about the failure
+          const analysisPrompt = `
+The previous implementation failed quality checks with the following error:
+---
+${msg}
+---
+
+Please analyze this error and provide:
+1. The root cause of the failure.
+2. What needs to be fixed in the next iteration.
+3. A synthesized summary for the progress log.
+
+Provide your response in the same <RALPH_ITERATION_LOG_JSON> format.
+`;
+          const analysisResponse = await this.executeTask(
+            status,
+            nextTask,
+            memory,
+            specContext,
+            analysisPrompt,
+          );
+
+          const { structured, raw } = this.parseIterationLog(analysisResponse);
+          await this.appendProgress(structured, raw);
           await this.callbacks.onTaskComplete(nextTask.id, false);
         }
       } catch (error: unknown) {
@@ -307,12 +402,15 @@ ${rawSummary}
    * Execute a single task using Amp CLI
    */
   private async executeTask(
-    status: ApplyInstructions,
+    _status: ApplyInstructions,
     task: { id: string; description: string },
     memory: string,
     specContext: string,
+    customPrompt?: string,
   ): Promise<string> {
-    const prompt = `
+    const prompt =
+      customPrompt ||
+      `
 # Ralph Autonomous Agent Mode
 
 You are an autonomous implementation agent working on the OpenSpec change "${this.changeId}".
@@ -334,55 +432,59 @@ ${memory}
 3. **Quality Assurance**:
    - Run the project's quality check: \`${this.config.checkCommand}\`.
    - Ensure the implementation matches the spec by running: \`openspec validate "${this.changeId}"\`.
-4. **Knowledge Management**:
+4. **Knowledge Management & Insights**:
    - **Update tasks.md**: Mark the task as complete (- [ ] to - [x]).
-   - **Update AGENTS.md**: If you discover reusable patterns, conventions, or non-obvious requirements in the directory you modified, update the local AGENTS.md file.
-   - **Capture Patterns**: If a pattern applies to the entire change, summarize it for the 'Codebase Patterns' section.
+   - **Update AGENTS.md**: If you discover reusable patterns, conventions, or non-obvious requirements, update the local AGENTS.md file.
+   - **Insight Synthesis**: In your final response, provide a clear synthesis of what was learned, any architectural decisions made, and how potential issues (like lint errors) were handled. Do not just dump raw logs.
 
 ## STOP CONDITION
 When the task is complete and quality checks pass:
-1. Provide a structured log in JSON format inside the sentinel tags.
+1. Provide a structured log in JSON format inside the sentinel tags. **The "summary" field should contain your high-level insight synthesis.**
 2. Output <promise>COMPLETE</promise>.
 
 <RALPH_ITERATION_LOG_JSON>
 {
-  "threadId": "T-xxxx...", // Your current Amp thread ID
+  "threadId": "T-xxxx...", 
   "task": "${task.id}",
   "implemented": ["Action A", "Action B"],
-  "codebasePatterns": ["New pattern discovered"],
-  "gotchas": ["Non-obvious behavior found"],
+  "codebasePatterns": ["Reasoning behind architectural choice"],
+  "gotchas": ["Root cause of any encountered errors and how they were bypassed"],
+  "summary": "Synthesized insight for the developer about this iteration",
   "complete": true
 }
 </RALPH_ITERATION_LOG_JSON>
 `;
 
     let fullResponse = "";
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(this.getAmpBin(), ["--execute"], {
-        cwd: this.config.path, // Run Amp in the target project directory
-        env: { ...process.env },
-        stdio: ["pipe", "pipe", "inherit"],
-      });
-
-      if (child.stdin) {
-        child.stdin.write(prompt);
-        child.stdin.end();
-      }
-
-      child.stdout.on("data", (data) => {
-        const chunk = data.toString();
-        process.stdout.write(chunk);
-        fullResponse += chunk;
-      });
-
-      child.on("close", (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`Amp exited with code ${code}`));
-      });
-
-      child.on("error", (err) => reject(err));
+    const ptyProcess = pty.spawn(this.getAmpBin(), ["--execute"], {
+      name: "xterm-color",
+      cols: 120,
+      rows: 40,
+      cwd: this.config.path,
+      env: { ...process.env } as Record<string, string>,
     });
 
-    return fullResponse;
+    return new Promise<string>((resolve, reject) => {
+      ptyProcess.onData((data) => {
+        fullResponse += data;
+        process.stdout.write(data);
+      });
+
+      // Write prompt to agent's stdin via pty
+      ptyProcess.write(prompt);
+      // We need to signal EOF if the agent expects it to start processing
+      // For Amp --execute, it might need a specific sequence or just wait
+      // Most PTY agents listen for the full input then start.
+      // Since we don't have a direct "end" for PTY stdin like child_process,
+      // we rely on the agent reading the prompt.
+
+      ptyProcess.onExit(({ exitCode }) => {
+        if (exitCode === 0) {
+          resolve(fullResponse);
+        } else {
+          reject(new Error(`Amp PTY exited with code ${exitCode}`));
+        }
+      });
+    });
   }
 }

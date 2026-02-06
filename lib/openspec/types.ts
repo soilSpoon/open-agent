@@ -96,6 +96,7 @@ export const ProjectConfigSchema = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string(),
-  checkCommand: z.string().default("bun run check"),
+  checkCommand: z.string().optional(),
+  preCheckCommand: z.string().optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

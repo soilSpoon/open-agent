@@ -16,7 +16,7 @@ import {
 } from "@/lib/openspec/service";
 import type { ArtifactType, ProjectConfig } from "@/lib/openspec/types";
 import { validateChange } from "@/lib/openspec/validator";
-import { logs, runs, tasks } from "@/lib/schema";
+import { logs, projects, runs, tasks } from "@/lib/schema";
 
 export async function getDashboardStats() {
   const [activeRunsCount, completedTasks] = await Promise.all([
@@ -224,4 +224,64 @@ export async function getActiveRuns() {
   });
 
   return runsWithDetails;
+}
+
+// Project CRUD Actions
+
+export async function getProjects() {
+  return await db.query.projects.findMany({
+    orderBy: desc(projects.updatedAt),
+  });
+}
+
+export async function getProject(id: string) {
+  return await db.query.projects.findFirst({
+    where: eq(projects.id, id),
+  });
+}
+
+export async function createProject(
+  name: string,
+  path: string,
+  checkCommand?: string,
+  preCheckCommand?: string,
+) {
+  const id = Math.random().toString(36).substring(7);
+  const now = new Date().toISOString();
+
+  await db.insert(projects).values({
+    id,
+    name,
+    path,
+    checkCommand,
+    preCheckCommand,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return id;
+}
+
+export async function updateProject(
+  id: string,
+  data: {
+    name?: string;
+    path?: string;
+    checkCommand?: string;
+    preCheckCommand?: string;
+  },
+) {
+  const now = new Date().toISOString();
+
+  await db
+    .update(projects)
+    .set({
+      ...data,
+      updatedAt: now,
+    })
+    .where(eq(projects.id, id));
+}
+
+export async function deleteProject(id: string) {
+  await db.delete(projects).where(eq(projects.id, id));
 }

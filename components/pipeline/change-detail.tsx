@@ -30,6 +30,7 @@ import type {
   ArtifactType,
   OpenSpecChange,
   OpenSpecCLIStatus,
+  ProjectConfig,
   SpecEntry,
 } from "@/lib/openspec/types";
 import type { Validation } from "@/lib/openspec/validation";
@@ -187,7 +188,7 @@ export function ChangeDetail({
       // Auto-save and validate after generation to provide immediate feedback
       setSaving(true);
       await updateArtifact(change.id, stage, generatedContent);
-      
+
       // If we're in specs, refresh the file list to show the new file immediately
       if (stage === "specs") {
         const files = await fetchSpecsList(change.id);
@@ -217,13 +218,15 @@ export function ChangeDetail({
       }
 
       // Get current project config from localStorage
-      let projectConfig;
+      let projectConfig: ProjectConfig | undefined;
       const savedProjects = localStorage.getItem("open-agent-projects");
       const activeProjectId = localStorage.getItem("open-agent-active-project");
 
       if (savedProjects && activeProjectId) {
         const projects = JSON.parse(savedProjects);
-        projectConfig = projects.find((p: any) => p.id === activeProjectId);
+        projectConfig = projects.find(
+          (p: ProjectConfig) => p.id === activeProjectId,
+        );
       }
 
       const runId = await startRalphRun(change.id, projectConfig);
@@ -333,92 +336,102 @@ export function ChangeDetail({
 
       <Card className="flex-1 min-h-[600px] flex flex-col">
         <CardContent className="p-6 flex-1 flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold capitalize flex items-center gap-2">
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
+            <h2 className="text-base md:text-lg font-semibold capitalize flex items-center gap-2">
               {stage} Editor
               {change.artifacts[stage].exists && (
-                <span className="text-xs font-normal text-muted-foreground">
-                  (Last modified:{" "}
+                <span className="text-[10px] md:text-xs font-normal text-muted-foreground">
+                  (Modified:{" "}
                   {new Date(
                     change.artifacts[stage].lastModified ?? "",
-                  ).toLocaleString()}
+                  ).toLocaleDateString()}
                   )
                 </span>
               )}
             </h2>
 
-            {stage === "tasks" && (
-              <div className="flex bg-muted p-1 rounded-md border shadow-sm">
-                <Button
-                  variant={viewMode === "visual" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-8 px-3"
-                  onClick={() => setViewMode("visual")}
-                >
-                  <LayoutPanelLeft className="h-4 w-4 mr-2" />
-                  Visual
-                </Button>
-                <Button
-                  variant={viewMode === "markdown" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-8 px-3"
-                  onClick={() => setViewMode("markdown")}
-                >
-                  <FileCode className="h-4 w-4 mr-2" />
-                  Markdown
-                </Button>
-              </div>
-            )}
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                onClick={handleGenerate}
-                disabled={generating || loading || isBlocked}
-                className={cn(
-                  isReady && !content && "ring-2 ring-blue-400 ring-offset-1",
-                  isBlocked && "opacity-50 cursor-not-allowed",
-                )}
-              >
-                {generating ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-2 h-4 w-4" />
-                )}
-                {isBlocked
-                  ? "Blocked"
-                  : isReady && !content
-                    ? "Draft with AI"
-                    : "Regenerate with AI"}
-              </Button>
-              <Button variant="outline" onClick={handleSave} disabled={saving}>
-                {saving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 h-4 w-4" />
-                )}
-                Save
-              </Button>
+            <div className="flex flex-wrap items-center gap-2">
               {stage === "tasks" && (
-                <Button
-                  className={cn(
-                    activeRunId
-                      ? "bg-green-600 hover:bg-green-700"
-                      : "bg-blue-600 hover:bg-blue-700",
-                  )}
-                  onClick={handleRunRalph}
-                  disabled={running}
-                >
-                  {running ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : activeRunId ? (
-                    <Play className="mr-2 h-4 w-4" />
-                  ) : (
-                    <Play className="mr-2 h-4 w-4" />
-                  )}
-                  {activeRunId ? `View Run #${activeRunId}` : "Run Ralph"}
-                </Button>
+                <div className="flex bg-muted p-1 rounded-md border shadow-sm">
+                  <Button
+                    variant={viewMode === "visual" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 md:h-8 px-2 md:px-3 text-xs md:text-sm"
+                    onClick={() => setViewMode("visual")}
+                  >
+                    <LayoutPanelLeft className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5 md:mr-2" />
+                    Visual
+                  </Button>
+                  <Button
+                    variant={viewMode === "markdown" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 md:h-8 px-2 md:px-3 text-xs md:text-sm"
+                    onClick={() => setViewMode("markdown")}
+                  >
+                    <FileCode className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5 md:mr-2" />
+                    Markdown
+                  </Button>
+                </div>
               )}
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleGenerate}
+                  disabled={generating || loading || isBlocked}
+                  className={cn(
+                    "flex-1 sm:flex-none text-xs md:text-sm h-8 md:h-9",
+                    isReady && !content && "ring-2 ring-blue-400 ring-offset-1",
+                    isBlocked && "opacity-50 cursor-not-allowed",
+                  )}
+                >
+                  {generating ? (
+                    <Loader2 className="mr-1.5 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-1.5 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4" />
+                  )}
+                  {isBlocked
+                    ? "Blocked"
+                    : isReady && !content
+                      ? "Draft"
+                      : "Regen"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex-1 sm:flex-none text-xs md:text-sm h-8 md:h-9"
+                >
+                  {saving ? (
+                    <Loader2 className="mr-1.5 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-1.5 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4" />
+                  )}
+                  Save
+                </Button>
+                {stage === "tasks" && (
+                  <Button
+                    size="sm"
+                    className={cn(
+                      "flex-1 sm:flex-none text-xs md:text-sm h-8 md:h-9",
+                      activeRunId
+                        ? "bg-green-600 hover:bg-green-700"
+                        : "bg-blue-600 hover:bg-blue-700",
+                    )}
+                    onClick={handleRunRalph}
+                    disabled={running}
+                  >
+                    {running ? (
+                      <Loader2 className="mr-1.5 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4 animate-spin" />
+                    ) : (
+                      <Play className="mr-1.5 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4" />
+                    )}
+                    {activeRunId ? "View" : "Run"}
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
