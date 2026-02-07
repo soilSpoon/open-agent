@@ -16,6 +16,7 @@ import {
   generateInstructions,
   getActiveRunForChange,
   getOpenSpecChangeStatus,
+  getProject,
   loadArtifact,
   startRalphRun,
   updateArtifact,
@@ -217,16 +218,21 @@ export function ChangeDetail({
         return;
       }
 
-      // Get current project config from localStorage
+      // Get current project config from database
       let projectConfig: ProjectConfig | undefined;
-      const savedProjects = localStorage.getItem("open-agent-projects");
       const activeProjectId = localStorage.getItem("open-agent-active-project");
 
-      if (savedProjects && activeProjectId) {
-        const projects = JSON.parse(savedProjects);
-        projectConfig = projects.find(
-          (p: ProjectConfig) => p.id === activeProjectId,
-        );
+      if (activeProjectId) {
+        const dbProject = await getProject(activeProjectId);
+        if (dbProject) {
+          projectConfig = {
+            id: dbProject.id,
+            name: dbProject.name,
+            path: dbProject.path,
+            checkCommand: dbProject.checkCommand ?? undefined,
+            preCheckCommand: dbProject.preCheckCommand ?? undefined,
+          };
+        }
       }
 
       const runId = await startRalphRun(change.id, projectConfig);

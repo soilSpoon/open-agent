@@ -8,7 +8,8 @@ import {
   Terminal,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { getProjects } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -23,23 +24,29 @@ export function ProjectDashboard({ children }: { children: React.ReactNode }) {
   const [selectedId, setSelectedId] = useState<string>("");
   const [isLoaded, setIsLoaded] = useState(false);
 
-  useEffect(() => {
-    const saved = localStorage.getItem("open-agent-projects");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setProjects(parsed);
-        if (parsed.length > 0) {
-          const activeId =
-            localStorage.getItem("open-agent-active-project") || parsed[0].id;
-          setSelectedId(activeId);
-        }
-      } catch (e) {
-        console.error("Failed to parse projects", e);
-      }
+  const loadProjects = useCallback(async () => {
+    const dbProjects = await getProjects();
+    const mappedProjects = dbProjects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      path: p.path,
+      checkCommand: p.checkCommand ?? undefined,
+      preCheckCommand: p.preCheckCommand ?? undefined,
+    }));
+    setProjects(mappedProjects);
+
+    if (mappedProjects.length > 0) {
+      const activeId =
+        localStorage.getItem("open-agent-active-project") ||
+        mappedProjects[0].id;
+      setSelectedId(activeId);
     }
     setIsLoaded(true);
   }, []);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
 
   const handleProjectChange = (value: string | null) => {
     if (!value) return;

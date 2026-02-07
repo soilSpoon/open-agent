@@ -221,7 +221,7 @@ export function ProjectSettings() {
                 <Terminal className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   id={cmdId}
-                  className="pl-9"
+                  className="pl-9 md:pl-9"
                   placeholder="bun run check"
                   value={newProject.checkCommand}
                   onChange={(e) =>
@@ -239,7 +239,7 @@ export function ProjectSettings() {
                 <Settings2 className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   id={preCmdId}
-                  className="pl-9"
+                  className="pl-9 md:pl-9"
                   placeholder="e.g. bun run lint"
                   value={newProject.preCheckCommand}
                   onChange={(e) =>
