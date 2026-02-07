@@ -15,14 +15,26 @@ const TextContentSchema = z.object({
   text: z.string(),
 });
 
+// Tool input type - key-value pairs with primitive values
+type ToolInput = Record<string, string | number | boolean | null | undefined>;
+
 const ToolUseContentSchema = z.object({
   type: z.literal("tool_use"),
   id: z.string(),
   name: z.string(),
-  input: z.record(
-    z.string(),
-    z.union([z.string(), z.number(), z.boolean(), z.null()]),
-  ),
+  input: z.custom<ToolInput>((val) => {
+    if (typeof val !== "object" || val === null) return false;
+    return Object.entries(val).every(([_, v]) => {
+      const type = typeof v;
+      return (
+        type === "string" ||
+        type === "number" ||
+        type === "boolean" ||
+        v === null ||
+        v === undefined
+      );
+    });
+  }),
 });
 
 const AssistantMessageSchema = z.object({

@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";

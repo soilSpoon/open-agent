@@ -456,12 +456,25 @@ When the task is complete and quality checks pass:
 `;
 
     let fullResponse = "";
+
+    // ProcessEnv to strict Record<string, string> conversion
+    const initialEnv: Record<string, string> = {};
+    const env = Object.entries(process.env).reduce<Record<string, string>>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = value;
+        }
+        return acc;
+      },
+      initialEnv,
+    );
+
     const ptyProcess = pty.spawn(this.getAmpBin(), ["--execute"], {
       name: "xterm-color",
       cols: 120,
       rows: 40,
       cwd: this.config.path,
-      env: { ...process.env } as Record<string, string>,
+      env,
     });
 
     return new Promise<string>((resolve, reject) => {

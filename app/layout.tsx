@@ -7,6 +7,7 @@ import { SidebarProvider } from "@/components/layout/sidebar-provider";
 import { SettingsProvider } from "@/components/settings-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { WorkerInit } from "@/components/worker-init";
+import { Providers } from "./providers";
 
 export { metadata } from "./layout-metadata";
 
@@ -43,7 +44,7 @@ export default function RootLayout({
                   <MobileHeader />
                   <Header />
                   <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6 bg-background">
-                    {children}
+                    <Providers>{children}</Providers>
                   </main>
                 </div>
               </div>
