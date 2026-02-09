@@ -47,8 +47,16 @@ describe("PromptTemplateEngine", () => {
 
       const recentLogs: IterationLog[] = [];
       const specContext = "### Test Spec\nSome content";
+      const instruction = "Implement feature X";
+      const taskList = "- [ ] task-1";
 
-      const vars = engine.buildVariables(session, specContext, recentLogs);
+      const vars = engine.buildVariables(
+        session,
+        specContext,
+        instruction,
+        taskList,
+        recentLogs,
+      );
 
       expect(vars.taskId).toBe("task-1");
       expect(vars.taskDescription).toBe("Test task description");
@@ -83,7 +91,7 @@ describe("PromptTemplateEngine", () => {
         },
       };
 
-      const vars = engine.buildVariables(session, "", []);
+      const vars = engine.buildVariables(session, "", "", "", []);
 
       expect(vars.hasRecentFailures).toBe(false);
       expect(vars.hasCodebasePatterns).toBe(false);
@@ -102,6 +110,8 @@ describe("PromptTemplateEngine", () => {
         projectPath: "/test",
         checkCommand: "bun run check",
         specContext: "### Spec",
+        instruction: "Instruction",
+        taskList: "Tasks",
         recentFailures: [
           {
             iteration: 4,
@@ -121,7 +131,7 @@ describe("PromptTemplateEngine", () => {
 
       const prompt = engine.generateMainPrompt(vars);
 
-      expect(prompt).toContain("Previous Iterations Context");
+      expect(prompt).toContain("CONTEXT FROM PREVIOUS ATTEMPTS");
       expect(prompt).toContain("Import error");
       expect(prompt).toContain("Add missing import");
     });
@@ -137,6 +147,8 @@ describe("PromptTemplateEngine", () => {
         projectPath: "/test",
         checkCommand: "bun run check",
         specContext: "### Spec",
+        instruction: "Instruction",
+        taskList: "Tasks",
         recentFailures: [],
         hasRecentFailures: false,
         codebasePatterns: ["Use zod for validation", "Prefer async/await"],
@@ -163,6 +175,8 @@ describe("PromptTemplateEngine", () => {
         projectPath: "/test",
         checkCommand: "bun run check",
         specContext: "### Spec",
+        instruction: "Instruction",
+        taskList: "Tasks",
         recentFailures: [],
         hasRecentFailures: false,
         codebasePatterns: [],
@@ -189,6 +203,8 @@ describe("PromptTemplateEngine", () => {
         projectPath: "/test",
         checkCommand: "bun run check",
         specContext: "### Spec",
+        instruction: "Instruction",
+        taskList: "Tasks",
         recentFailures: [],
         hasRecentFailures: false,
         codebasePatterns: [],

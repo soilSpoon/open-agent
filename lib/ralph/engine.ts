@@ -309,9 +309,12 @@ export class RalphEngine {
     const commitBefore = await this.getCurrentGitSha();
 
     // Capture initial dirty state to avoid committing unrelated changes
-    const { stdout: initialStatus } = await execAsync("git status --porcelain", {
-      cwd: this.config.path,
-    });
+    const { stdout: initialStatus } = await execAsync(
+      "git status --porcelain",
+      {
+        cwd: this.config.path,
+      },
+    );
     const initialFiles = new Set(
       initialStatus
         .split("\n")
@@ -358,9 +361,12 @@ export class RalphEngine {
         structured.agentClaimedComplete && verificationEvidence.allChecksPassed;
 
       // Identify changes made during THIS iteration
-      const { stdout: currentStatus } = await execAsync("git status --porcelain", {
-        cwd: this.config.path,
-      });
+      const { stdout: currentStatus } = await execAsync(
+        "git status --porcelain",
+        {
+          cwd: this.config.path,
+        },
+      );
       const currentChanges = currentStatus.split("\n").filter(Boolean);
 
       // Extract files that were modified or created by the agent

@@ -23,13 +23,12 @@ import {
 const SESSION_FILENAME = "session.json";
 const LOCK_FILENAME = ".lock";
 
+function hasCode(error: unknown): error is { code: unknown } {
+  return typeof error === "object" && error !== null && "code" in error;
+}
+
 function isENOENT(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code: unknown }).code === "ENOENT"
-  );
+  return hasCode(error) && error.code === "ENOENT";
 }
 
 export interface SessionManagerOptions {

@@ -11,20 +11,17 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
-  CURRENT_SCHEMA_VERSION,
   type FailureAnalysis,
   type IterationLog,
   IterationLogSchema,
-  IterationStatusSchema,
 } from "./types";
 
+function hasCode(error: unknown): error is { code: unknown } {
+  return typeof error === "object" && error !== null && "code" in error;
+}
+
 function isENOENT(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code: unknown }).code === "ENOENT"
-  );
+  return hasCode(error) && error.code === "ENOENT";
 }
 
 export interface IterationPersistenceOptions {
@@ -134,7 +131,9 @@ export class IterationPersistence {
   async listIterationLogs(): Promise<IterationLogInfo[]> {
     try {
       const files = await fs.readdir(this.iterationsDir);
-      const logFiles = files.filter((f) => f.endsWith(".json") && !f.endsWith(".tmp"));
+      const logFiles = files.filter(
+        (f) => f.endsWith(".json") && !f.endsWith(".tmp"),
+      );
 
       const infos: IterationLogInfo[] = [];
       for (const filename of logFiles) {
@@ -414,210 +413,6 @@ export class IterationPersistence {
   // Internal Formatting and Parsing
   // ========================================================================
 
-  /**
-   * Format iteration log as JSONL with YAML frontmatter
-   */
-  private formatIterationLog(log: IterationLog): string {
-    const lines: string[] = [];
-
-    // YAML frontmatter metadata
-    lines.push("---");
-    lines.push(`iteration: ${log.iteration}`);
-    lines.push(`taskId: "${log.taskId}"`);
-    lines.push(`status: "${log.status}"`);
-    lines.push(`sessionId: "${log.sessionId}"`);
-    lines.push(`startedAt: "${log.timestamp}"`);
-    if (log.durationMs) {
-      const completedAt = new Date(
-        new Date(log.timestamp).getTime() + log.durationMs,
-      ).toISOString();
-      lines.push(`completedAt: "${completedAt}"`);
-    }
-    lines.push("---");
-    lines.push("");
-
-    // Main JSONL content
-    const mainLog = {
-      schemaVersion: log.schemaVersion ?? CURRENT_SCHEMA_VERSION,
-      sessionId: log.sessionId,
-      iteration: log.iteration,
-      taskId: log.taskId,
-      taskAttempt: log.taskAttempt,
-      timestamp: log.timestamp,
-      threadId: log.threadId,
-      status: log.status,
-      promptTokens: log.promptTokens,
-      agentClaimedComplete: log.agentClaimedComplete,
-      verificationEvidence: log.verificationEvidence,
-      context: log.context,
-      implemented: log.implemented,
-      codebasePatterns: log.codebasePatterns,
-      summary: log.summary,
-      failureAnalysis: log.failureAnalysis,
-      commitBefore: log.commitBefore,
-      commitAfter: log.commitAfter,
-      durationMs: log.durationMs,
-    };
-
-    lines.push(JSON.stringify(mainLog));
-
-    // Raw output as separate line if present
-    if (log.rawOutput) {
-      lines.push("");
-      lines.push("--- RAW OUTPUT ---");
-      lines.push(log.rawOutput);
-    }
-
-    return lines.join("\n");
-  }
-
-  /**
-   * Parse iteration log from file content
-   */
-  private parseIterationLog(
-    content: string,
-    filename: string,
-  ): IterationLog | null {
-    try {
-      // Split frontmatter and content
-      const frontmatterMatch = content.match(
-        /^---\n([\s\S]*?)\n---\n([\s\S]*)$/,
-      );
-      if (!frontmatterMatch) {
-        // Try to parse as plain JSONL (no frontmatter)
-        return this.parsePlainJsonl(content, filename);
-      }
-
-      const frontmatter = frontmatterMatch[1];
-      const body = frontmatterMatch[2];
-
-      // Parse frontmatter
-      const metadata = this.parseFrontmatter(frontmatter);
-
-      // Find JSON line (first non-empty line after frontmatter)
-      const lines = body.split("\n");
-      let jsonLine = "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith("---")) {
-          jsonLine = trimmed;
-          break;
-        }
-      }
-
-      if (!jsonLine) {
-        return null;
-      }
-
-      const raw = JSON.parse(jsonLine);
-      if (typeof raw !== "object" || raw === null) return null;
-      const parsed: Record<string, unknown> = raw;
-
-      // Extract raw output if present
-      const rawMatch = body.match(/--- RAW OUTPUT ---\n([\s\S]*)$/);
-      if (rawMatch?.[1]) {
-        parsed.rawOutput = rawMatch[1].trim();
-      }
-
-      // Safe status parsing
-      const statusResult = IterationStatusSchema.safeParse(metadata.status);
-      const status = statusResult.success
-        ? statusResult.data
-        : parsed.status || "in_progress";
-
-      const candidate = {
-        ...parsed,
-        schemaVersion: parsed.schemaVersion ?? CURRENT_SCHEMA_VERSION,
-        sessionId: metadata.sessionId || parsed.sessionId || "unknown",
-        iteration: metadata.iteration || parsed.iteration || 0,
-        taskId: metadata.taskId || parsed.taskId || "unknown",
-        status,
-        timestamp:
-          metadata.startedAt || parsed.timestamp || new Date().toISOString(),
-        // Defaults for required fields that might be missing in older logs or partial writes
-        taskAttempt: parsed.taskAttempt ?? 1,
-        agentClaimedComplete: parsed.agentClaimedComplete ?? false,
-        durationMs: parsed.durationMs ?? 0,
-      };
-
-      return IterationLogSchema.parse(candidate);
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Parse plain JSONL without frontmatter
-   */
-  private parsePlainJsonl(
-    content: string,
-    filename: string,
-  ): IterationLog | null {
-    try {
-      const lines = content.split("\n").filter((l) => l.trim());
-      if (lines.length === 0) return null;
-
-      const raw = JSON.parse(lines[0]);
-      if (typeof raw !== "object" || raw === null) return null;
-
-      const parsed: Record<string, unknown> = raw;
-
-      // Try to extract metadata from filename
-      const filenameMatch = filename.match(/^(.+?)_(\d+)_(.+)\.log$/);
-      if (filenameMatch) {
-        const [, sessionPart, timestamp, taskId] = filenameMatch;
-        parsed.sessionId = parsed.sessionId || sessionPart;
-        parsed.taskId = parsed.taskId || taskId;
-        if (!parsed.timestamp && timestamp) {
-          parsed.timestamp = new Date(Number(timestamp)).toISOString();
-        }
-      }
-
-      const candidate = {
-        ...parsed,
-        schemaVersion: parsed.schemaVersion ?? CURRENT_SCHEMA_VERSION,
-        iteration: parsed.iteration ?? 0,
-        taskAttempt: parsed.taskAttempt ?? 1,
-        agentClaimedComplete: parsed.agentClaimedComplete ?? false,
-        durationMs: parsed.durationMs ?? 0,
-        status: parsed.status || "in_progress",
-      };
-
-      return IterationLogSchema.parse(candidate);
-    } catch {
-      return null;
-    }
-  }
-
-  private parseFrontmatter(frontmatter: string): Partial<IterationLogMetadata> {
-    const result: Partial<IterationLogMetadata> = {};
-    const lines = frontmatter.split("\n");
-
-    for (const line of lines) {
-      const match = line.match(/^([^:]+):\s*(.+)$/);
-      if (match) {
-        const [, key, value] = match;
-        const trimmed = value.replace(/^["']|["']$/g, "");
-
-        if (key === "iteration") result.iteration = Number(trimmed);
-        else if (key === "taskId") result.taskId = trimmed;
-        else if (key === "status") result.status = trimmed;
-        else if (key === "startedAt") result.startedAt = trimmed;
-        else if (key === "completedAt") result.completedAt = trimmed;
-        else if (key === "sessionId") result.sessionId = trimmed;
-      }
-    }
-
-    return result;
-  }
-
-  private generateFilename(log: IterationLog): string {
-    const sessionPrefix = log.sessionId.slice(0, 8);
-    const timestamp = new Date(log.timestamp).getTime();
-    const safeTaskId = log.taskId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    return `${sessionPrefix}_${timestamp}_${safeTaskId}.log`;
-  }
-
   private async getLogInfo(filename: string): Promise<IterationLogInfo | null> {
     const filepath = path.join(this.iterationsDir, filename);
 
@@ -644,28 +439,6 @@ export class IterationPersistence {
     } catch {
       return null;
     }
-  }
-
-  private extractMetadataFromFilename(filename: string): IterationLogMetadata {
-    const match = filename.match(/^(.+?)_(\d+)_(.+)\.log$/);
-    if (match) {
-      const [, sessionId, timestamp, taskId] = match;
-      return {
-        sessionId: sessionId || "unknown",
-        iteration: 0,
-        taskId: taskId || "unknown",
-        status: "unknown",
-        startedAt: new Date(Number(timestamp)).toISOString(),
-      };
-    }
-
-    return {
-      sessionId: this.sessionId,
-      iteration: 0,
-      taskId: "unknown",
-      status: "unknown",
-      startedAt: new Date().toISOString(),
-    };
   }
 
   private generateSummaryText(

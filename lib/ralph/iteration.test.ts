@@ -59,7 +59,7 @@ describe("IterationPersistence", () => {
   });
 
   describe("save and read", () => {
-    it("should save iteration log in JSONL format", async () => {
+    it("should save iteration log in JSON format", async () => {
       const log = createTestLog(1, {
         implemented: ["Added feature A"],
         codebasePatterns: ["Use composition over inheritance"],
@@ -71,8 +71,8 @@ describe("IterationPersistence", () => {
       // Check file was created with correct extension
       const files = await fs.readdir(ITERATIONS_DIR);
       expect(files).toContain(filename);
-      expect(filename).toEndWith(".log");
-      expect(filename).toStartWith(TEST_SESSION_ID.slice(0, 8));
+      expect(filename).toEndWith(".json");
+      expect(filename).toStartWith("0001");
     });
 
     it("should read saved iteration log", async () => {
@@ -330,7 +330,7 @@ describe("IterationPersistence", () => {
 
       // Verify files still exist
       const files = await fs.readdir(ITERATIONS_DIR);
-      expect(files.filter((f) => f.endsWith(".log"))).toHaveLength(10);
+      expect(files.filter((f) => f.endsWith(".json"))).toHaveLength(10);
     });
   });
 

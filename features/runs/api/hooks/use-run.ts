@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { getRun } from "@/app/actions";
+import { type Run, RunSchema } from "@/features/runs/types";
 import { queryKeys } from "@/lib/query/keys";
 
 interface UseRunOptions {
@@ -12,27 +13,19 @@ interface UseRunOptions {
 const POLLING_INTERVAL = 2000; // 2 seconds for real-time updates
 
 export function useRun({ runId, enabled = true }: UseRunOptions) {
-  return useQuery({
+  return useQuery<Run | null>({
     queryKey: queryKeys.runs.byId(runId),
     queryFn: async () => {
       const data = await getRun(runId);
       if (!data) return null;
-      return {
-        id: data.id,
+
+      // Validate the response with Zod schema to ensure type safety
+      // This throws if the data doesn't match the expected schema
+      return RunSchema.parse({
+        ...data,
+        // Ensure status is valid for the enum if needed, though parse handles it
         status: data.status,
-        logs: data.logs.map((l) => ({
-          ...l,
-          id: String(l.id),
-          timestamp: l.timestamp,
-          level: l.level,
-          message: l.message,
-        })),
-        tasks: data.tasks.map((t) => ({
-          id: t.id,
-          title: t.title,
-          status: t.status,
-        })),
-      };
+      });
     },
     enabled,
     refetchInterval: (query) => {

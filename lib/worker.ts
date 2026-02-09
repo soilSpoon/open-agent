@@ -148,6 +148,12 @@ class RalphWorker {
 
       const result = await engine.run();
       console.log(`[RalphWorker] [${run.id}] engine.run() finished:`, result);
+
+      // Ensure run is marked as complete in DB using the result from the engine
+      await callbacks.onRunComplete(
+        result.success,
+        result.message ?? (result.success ? "Run completed" : "Run failed"),
+      );
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);

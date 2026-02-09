@@ -1,4 +1,6 @@
 "use server";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { desc, eq } from "drizzle-orm";
 import db from "@/lib/db";
 import {
@@ -16,6 +18,8 @@ import {
 } from "@/lib/openspec/service";
 import type { ArtifactType, ProjectConfig } from "@/lib/openspec/types";
 import { validateChange } from "@/lib/openspec/validator";
+import { createIterationPersistence } from "@/lib/ralph/iteration";
+import type { IterationLog } from "@/lib/ralph/types";
 import { logs, projects, runs, tasks } from "@/lib/schema";
 
 export async function getDashboardStats() {
@@ -157,6 +161,52 @@ export async function startRalphRun(
   return runId;
 }
 
+export async function retryRun(runId: string) {
+  const oldRun = await db.query.runs.findFirst({
+    where: eq(runs.id, runId),
+  });
+
+  if (!oldRun || !oldRun.changeId) {
+    throw new Error("Run not found or missing change ID");
+  }
+
+  const projectConfig = oldRun.projectConfig
+    ? (JSON.parse(oldRun.projectConfig) as ProjectConfig)
+    : undefined;
+
+  // Reset iteration count to 0 while preserving learned context
+  if (projectConfig) {
+    const sessionPath = path.join(
+      projectConfig.path,
+      "openspec",
+      "changes",
+      oldRun.changeId,
+      ".ralph",
+      "session.json",
+    );
+    try {
+      const content = await fs.readFile(sessionPath, "utf-8");
+      const session = JSON.parse(content) as {
+        iteration: number;
+        status: string;
+        errorHandling: { currentRetryCount: number };
+      };
+      session.iteration = 0;
+      session.status = "running";
+      session.errorHandling.currentRetryCount = 0;
+      await fs.writeFile(
+        sessionPath,
+        JSON.stringify(session, null, 2),
+        "utf-8",
+      );
+    } catch {
+      // Session file might not exist, which is fine - engine will create new one
+    }
+  }
+
+  return await startRalphRun(oldRun.changeId, projectConfig);
+}
+
 export async function getRun(runId: string) {
   const run = await db.query.runs.findFirst({
     where: eq(runs.id, runId),
@@ -168,12 +218,99 @@ export async function getRun(runId: string) {
 
   if (!run) return null;
 
+  let iterationLogs: (IterationLog & { id: string })[] = [];
+  const allTasks: {
+    id: string;
+    title: string;
+    status: string;
+    run_id: string;
+  }[] = [];
+
+  // Try to load detailed iteration logs and tasks from files
+  if (run.projectConfig && run.changeId) {
+    try {
+      const config = JSON.parse(run.projectConfig) as ProjectConfig;
+      const changeBasePath = path.join(
+        config.path,
+        "openspec",
+        "changes",
+        run.changeId,
+      );
+      const ralphDir = path.join(changeBasePath, ".ralph");
+      const iterationsDir = path.join(ralphDir, "iterations");
+
+      const persistence = createIterationPersistence({
+        iterationsDir,
+        ralphDir,
+        sessionId: runId,
+      });
+
+      iterationLogs = await persistence
+        .listIterationLogs()
+        .then(async (infos) => {
+          const logs: (IterationLog & { id: string })[] = [];
+          for (const info of infos) {
+            const log = await persistence.readIteration(info.filename);
+            if (log) {
+              logs.push({
+                ...log,
+                id: info.filename,
+                timestamp: log.timestamp || info.metadata.startedAt,
+              });
+            }
+          }
+          return logs.sort((a, b) => a.iteration - b.iteration);
+        });
+
+      // Parse tasks.md to get full task list
+      const tasksPath = path.join(changeBasePath, "tasks.md");
+      try {
+        const tasksContent = await fs.readFile(tasksPath, "utf-8");
+        const dbTasksMap = new Map(run.tasks.map((t) => [t.id, t]));
+
+        // Parse markdown task items: - [x] or - [ ] followed by task number and title
+        const taskRegex = /^-\s*\[(x| )\]\s*(\d+(?:\.\d+)?)\s+(.+?)$/gm;
+        let match = taskRegex.exec(tasksContent);
+
+        while (match !== null) {
+          const isCompleted = match[1] === "x";
+          const taskId = match[2];
+          const title = match[3].trim();
+
+          // Check if task exists in DB with current status
+          const dbTask = dbTasksMap.get(taskId);
+          const status =
+            dbTask?.status ?? (isCompleted ? "completed" : "pending");
+
+          allTasks.push({
+            id: taskId,
+            title,
+            status,
+            run_id: runId,
+          });
+
+          match = taskRegex.exec(tasksContent);
+        }
+      } catch {
+        // tasks.md doesn't exist, fall back to DB tasks
+      }
+    } catch (e) {
+      console.error("Failed to load iteration logs:", e);
+    }
+  }
+
+  // Use parsed tasks if available, otherwise fall back to DB tasks
+  const finalTasks =
+    allTasks.length > 0
+      ? allTasks
+      : run.tasks.map((t) => ({ ...t, run_id: t.runId }));
+
   return {
     id: run.id,
     status: run.status,
     change_id: run.changeId,
-    logs: run.logs.map((l) => ({ ...l, id: String(l.id), run_id: l.runId })),
-    tasks: run.tasks.map((t) => ({ ...t, run_id: t.runId })),
+    logs: iterationLogs,
+    tasks: finalTasks,
   };
 }
 
