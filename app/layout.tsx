@@ -36,14 +36,14 @@ export default function RootLayout({
           <SettingsProvider>
             <SidebarProvider>
               <WorkerInit />
-              <div className="grid min-h-svh w-full lg:grid-cols-[280px_1fr]">
-                <div className="hidden border-r bg-muted/40 lg:block">
+              <div className="grid min-h-svh w-full md:grid-cols-[280px_1fr]">
+                <div className="hidden border-r bg-muted/40 md:block">
                   <Sidebar className="flex" />
                 </div>
                 <div className="flex flex-col">
                   <MobileHeader />
                   <Header />
-                  <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6 bg-background">
+                  <main className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6 bg-background">
                     <Providers>{children}</Providers>
                   </main>
                 </div>

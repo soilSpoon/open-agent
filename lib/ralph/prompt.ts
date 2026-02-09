@@ -33,6 +33,8 @@ export interface TemplateVariables {
 
   // Spec context
   specContext: string;
+  instruction: string;
+  taskList: string;
 
   // Failure context (KEY for context propagation)
   recentFailures: Array<{
@@ -67,6 +69,8 @@ export class PromptTemplateEngine {
   buildVariables(
     session: SessionState,
     specContext: string,
+    instruction: string,
+    taskList: string,
     recentLogs: IterationLog[],
   ): TemplateVariables {
     const task = session.currentTask;
@@ -90,6 +94,8 @@ export class PromptTemplateEngine {
       projectPath: this.options.projectPath,
       checkCommand: this.options.checkCommand,
       specContext,
+      instruction,
+      taskList,
       recentFailures,
       hasRecentFailures: recentFailures.length > 0,
       codebasePatterns: session.context.codebasePatterns,
@@ -129,15 +135,19 @@ export class PromptTemplateEngine {
 
     // Previous Iterations Context
     if (v.hasRecentFailures) {
-      parts.push("## Previous Iterations Context");
+      parts.push("## CONTEXT FROM PREVIOUS ATTEMPTS");
       parts.push("");
-      parts.push("Recent attempts for this task:");
+      parts.push(
+        "Recent findings and technical root causes from previous iterations:",
+      );
       parts.push("");
       v.recentFailures.forEach((failure, idx) => {
         parts.push(`### Attempt ${idx + 1}`);
         parts.push(`- **Root Cause**: ${failure.rootCause}`);
         parts.push(`- **Suggested Fix**: ${failure.fixPlan}`);
-        parts.push(`- **Error**: ${failure.errorMessage}`);
+        if (failure.errorMessage) {
+          parts.push(`- **Error**: ${failure.errorMessage}`);
+        }
         parts.push("");
       });
       parts.push("");
@@ -158,7 +168,15 @@ export class PromptTemplateEngine {
     }
 
     // Spec Context
-    parts.push("## AUTHORITATIVE SPEC");
+    parts.push("## AUTHORITATIVE SPEC & INSTRUCTIONS");
+    parts.push("");
+    parts.push("### Current Instructions");
+    parts.push(v.instruction);
+    parts.push("");
+    parts.push("### Task List Status");
+    parts.push(v.taskList);
+    parts.push("");
+    parts.push("### Reference Spec (change.json)");
     parts.push(v.specContext);
     parts.push("");
 

@@ -7,10 +7,10 @@ import { Button } from "@/components/ui/button";
 
 export function MobileHeader() {
   return (
-    <header className="flex h-14 items-center gap-4 border-b bg-muted/40 px-4 lg:hidden">
+    <header className="flex h-14 items-center gap-4 border-b bg-muted/40 px-4 md:hidden">
       <MobileSidebar
         trigger={
-          <Button variant="ghost" size="icon" className="lg:hidden">
+          <Button variant="ghost" size="icon" className="md:hidden">
             <Menu className="h-5 w-5" />
             <span className="sr-only">Toggle navigation menu</span>
           </Button>

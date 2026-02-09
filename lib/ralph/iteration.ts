@@ -72,15 +72,15 @@ export class IterationPersistence {
   // ========================================================================
 
   /**
-   * Save a new iteration log (JSONL format with YAML frontmatter)
-   * File naming: {sessionId.slice(0,8)}_{timestamp}_{taskId}.log
+   * Save a new iteration log (Individual JSON format)
+   * File naming: 0001.json, 0002.json, ...
    */
   async saveIteration(log: IterationLog): Promise<string> {
-    const filename = this.generateFilename(log);
+    const filename = `${String(log.iteration).padStart(4, "0")}.json`;
     const filepath = path.join(this.iterationsDir, filename);
 
-    // Build JSONL content with YAML frontmatter
-    const content = this.formatIterationLog(log);
+    // Build JSON content
+    const content = JSON.stringify(log, null, 2);
 
     // Atomic write
     const tempPath = `${filepath}.tmp`;
@@ -104,7 +104,8 @@ export class IterationPersistence {
 
     try {
       const content = await fs.readFile(filepath, "utf-8");
-      return this.parseIterationLog(content, filename);
+      // Individual JSON files are simple JSON objects
+      return IterationLogSchema.parse(JSON.parse(content));
     } catch (error) {
       if (isENOENT(error)) {
         return null;
@@ -133,7 +134,7 @@ export class IterationPersistence {
   async listIterationLogs(): Promise<IterationLogInfo[]> {
     try {
       const files = await fs.readdir(this.iterationsDir);
-      const logFiles = files.filter((f) => f.endsWith(".log"));
+      const logFiles = files.filter((f) => f.endsWith(".json") && !f.endsWith(".tmp"));
 
       const infos: IterationLogInfo[] = [];
       for (const filename of logFiles) {
@@ -623,21 +624,14 @@ export class IterationPersistence {
     try {
       const stats = await fs.stat(filepath);
       const content = await fs.readFile(filepath, "utf-8");
-
-      // Extract frontmatter
-      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-      const metadataPartial = frontmatterMatch
-        ? this.parseFrontmatter(frontmatterMatch[1])
-        : this.extractMetadataFromFilename(filename);
+      const log = IterationLogSchema.parse(JSON.parse(content));
 
       const metadata: IterationLogMetadata = {
-        iteration: metadataPartial.iteration ?? 0,
-        taskId: metadataPartial.taskId ?? "unknown",
-        status: metadataPartial.status ?? "unknown",
-        startedAt:
-          metadataPartial.startedAt ?? new Date(stats.mtime).toISOString(),
-        sessionId: metadataPartial.sessionId ?? "unknown",
-        completedAt: metadataPartial.completedAt,
+        iteration: log.iteration,
+        taskId: log.taskId,
+        status: log.status,
+        startedAt: log.timestamp,
+        sessionId: log.sessionId,
       };
 
       return {

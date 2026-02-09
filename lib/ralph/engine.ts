@@ -308,15 +308,34 @@ export class RalphEngine {
     const startTime = Date.now();
     const commitBefore = await this.getCurrentGitSha();
 
+    // Capture initial dirty state to avoid committing unrelated changes
+    const { stdout: initialStatus } = await execAsync("git status --porcelain", {
+      cwd: this.config.path,
+    });
+    const initialFiles = new Set(
+      initialStatus
+        .split("\n")
+        .map((line) => line.slice(3).trim())
+        .filter(Boolean),
+    );
+
     try {
       // Generate and execute prompt
+      const status = await this.getOpenSpecStatus();
       const specContext = await this.getSpecContext();
       const recentLogs =
         await this.iterationPersistence.readRecentIterations(3);
 
+      // Build task list summary for prompt
+      const taskList = status.tasks
+        .map((t) => `${t.done ? "✓" : " "} [${t.id}] ${t.description}`)
+        .join("\n");
+
       const variables = this.promptEngine.buildVariables(
         session,
         specContext,
+        status.instruction,
+        taskList,
         recentLogs,
       );
       const prompt = this.promptEngine.generateMainPrompt(variables);
@@ -334,14 +353,51 @@ export class RalphEngine {
         task.id,
       );
 
-      // Commit changes
-      const commitMsg = `feat: ${task.id} - ${task.description}`;
-      await execAsync(`git add . && git commit -m "${commitMsg}"`, {
+      // Determine status based on dual-gate verification
+      const isSuccessful =
+        structured.agentClaimedComplete && verificationEvidence.allChecksPassed;
+
+      // Identify changes made during THIS iteration
+      const { stdout: currentStatus } = await execAsync("git status --porcelain", {
         cwd: this.config.path,
       });
-      const commitAfter = await this.getCurrentGitSha();
+      const currentChanges = currentStatus.split("\n").filter(Boolean);
 
-      // Save successful iteration log
+      // Extract files that were modified or created by the agent
+      const agentFiles = currentChanges
+        .map((line) => line.slice(3).trim())
+        .filter((file) => !initialFiles.has(file));
+
+      const hasAgentChanges = agentFiles.length > 0;
+      let commitAfter: string | undefined = commitBefore;
+
+      // Commit changes ONLY if they were made by agent AND verification passed
+      if (hasAgentChanges && isSuccessful) {
+        const commitMsg = `feat: ${task.id} - ${task.description}`;
+
+        // Add ONLY the files the agent touched
+        for (const file of agentFiles) {
+          await execAsync(`git add "${file}"`, { cwd: this.config.path });
+        }
+
+        await execAsync(`git commit -m "${commitMsg}"`, {
+          cwd: this.config.path,
+        });
+        commitAfter = await this.getCurrentGitSha();
+        await this.log(
+          "info",
+          `Committed ${agentFiles.length} agent-authored files for task ${task.id}`,
+        );
+      } else if (hasAgentChanges && !isSuccessful) {
+        await this.log(
+          "warn",
+          `Changes detected for task ${task.id} but verification failed. Keeping changes for next attempt.`,
+        );
+      } else if (!hasAgentChanges) {
+        await this.log("info", `No new changes detected for task ${task.id}`);
+      }
+
+      // Save iteration log
       const iterationLog: IterationLog = {
         schemaVersion: CURRENT_SCHEMA_VERSION,
         sessionId: this.sessionManager.getSessionId(),
@@ -350,9 +406,9 @@ export class RalphEngine {
         taskAttempt: session.currentTask?.attemptCount ?? 1,
         timestamp: new Date().toISOString(),
         threadId: structured.threadId,
-        status: "success",
+        status: isSuccessful ? "success" : "failed",
         promptTokens: this.promptEngine.estimateTokens(prompt),
-        agentClaimedComplete: structured.agentClaimedComplete ?? true,
+        agentClaimedComplete: structured.agentClaimedComplete ?? false,
         verificationEvidence,
         context: structured.context,
         implemented: structured.implemented ?? [],
@@ -366,15 +422,38 @@ export class RalphEngine {
 
       await this.iterationPersistence.saveIteration(iterationLog);
 
-      // Update session patterns
-      for (const pattern of structured.codebasePatterns ?? []) {
-        this.sessionManager.addPatternToContext(session, pattern);
+      if (isSuccessful) {
+        // Update session patterns
+        for (const pattern of structured.codebasePatterns ?? []) {
+          this.sessionManager.addPatternToContext(session, pattern);
+        }
+
+        // Mark task complete in tasks.md
+        await this.markTaskComplete(task.id);
+
+        return {
+          taskCompleted: true,
+          shouldSkip: false,
+          shouldEscalate: false,
+        };
+      } else {
+        // It failed verification even if agent claimed complete
+        const rootCause = verificationEvidence.allChecksPassed
+          ? "Agent did not claim complete"
+          : "Quality checks or spec validation failed";
+
+        return {
+          taskCompleted: false,
+          shouldSkip: false,
+          shouldEscalate: false,
+          failureAnalysis: {
+            rootCause,
+            fixPlan: "Fix the reported errors and ensure all checks pass.",
+            errorMessage: verificationEvidence.checkOutput,
+            errorType: "validation",
+          },
+        };
       }
-
-      // Mark task complete in tasks.md
-      await this.markTaskComplete(task.id);
-
-      return { taskCompleted: true, shouldSkip: false, shouldEscalate: false };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
