@@ -7,8 +7,8 @@
  * - Progress.md generation (derived)
  */
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type { IterationLog, FailureAnalysis, IterationStatus } from './types.js';
 import { CURRENT_SCHEMA_VERSION } from './types.js';
 
