@@ -1,7 +1,6 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useRef } from "react";
 import { useRun } from "@/features/runs/api/hooks/use-run";
 
 interface RunMonitorProps {
@@ -9,7 +8,7 @@ interface RunMonitorProps {
 }
 
 export function RunMonitor({ runId }: RunMonitorProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // const scrollRef = useRef<HTMLDivElement>(null);
   const { data: run, isLoading } = useRun({ runId });
 
   if (isLoading) {

@@ -124,10 +124,11 @@ export function MarkdownEditor({
           contentEditable={
             <ContentEditable
               className={cn(
-                "outline-none flex-1 p-4 min-h-[400px] text-base md:text-sm",
+                "outline-none flex-1 p-4 min-h-[400px] text-base md:text-lg",
                 type === "tasks" && "font-sans",
                 type === "specs" && "font-mono",
               )}
+              aria-label={placeholder}
             />
           }
           placeholder={

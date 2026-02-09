@@ -27,6 +27,8 @@ import { TaskVisualEditor } from "@/components/pipeline/task-visual-editor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useProjects } from "@/features/projects/api/hooks/use-projects";
+import { useSelectedProjectId } from "@/features/projects/stores/project-store";
 import type {
   ArtifactType,
   OpenSpecChange,
@@ -210,6 +212,19 @@ export function ChangeDetail({
     }
   };
 
+  const selectedProjectId = useSelectedProjectId();
+  const { data: projects = [] } = useProjects();
+
+  // Auto-select first project if none selected and projects available
+  useEffect(() => {
+    if (!selectedProjectId && projects.length > 0) {
+      const {
+        useProjectStore,
+      } = require("@/features/projects/stores/project-store");
+      useProjectStore.getState().setSelectedProject(projects[0].id);
+    }
+  }, [selectedProjectId, projects]);
+
   const handleRunRalph = async () => {
     setRunning(true);
     try {
@@ -218,12 +233,11 @@ export function ChangeDetail({
         return;
       }
 
-      // Get current project config from database
+      // Get current project config from zustand store
       let projectConfig: ProjectConfig | undefined;
-      const activeProjectId = localStorage.getItem("open-agent-active-project");
 
-      if (activeProjectId) {
-        const dbProject = await getProject(activeProjectId);
+      if (selectedProjectId) {
+        const dbProject = await getProject(selectedProjectId);
         if (dbProject) {
           projectConfig = {
             id: dbProject.id,
@@ -233,6 +247,12 @@ export function ChangeDetail({
             preCheckCommand: dbProject.preCheckCommand ?? undefined,
           };
         }
+      }
+
+      if (!projectConfig) {
+        alert("Please select a project first in the dashboard.");
+        setRunning(false);
+        return;
       }
 
       const runId = await startRalphRun(change.id, projectConfig);
@@ -427,7 +447,7 @@ export function ChangeDetail({
                         : "bg-blue-600 hover:bg-blue-700",
                     )}
                     onClick={handleRunRalph}
-                    disabled={running}
+                    disabled={running || !selectedProjectId}
                   >
                     {running ? (
                       <Loader2 className="mr-1.5 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4 animate-spin" />

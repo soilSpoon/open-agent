@@ -1,5 +1,7 @@
 import { exec } from "node:child_process";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import * as pty from "node-pty";
@@ -102,14 +104,25 @@ export class Ralph {
   }
 
   private getAmpBin(): string {
-    // We prefer the amp binary in the project if it exists, otherwise use the one in open-agent
+    // 1. Try ~/.amp/bin/amp
+    const homeAmp = path.join(os.homedir(), ".amp", "bin", "amp");
+    if (fsSync.existsSync(homeAmp)) {
+      return homeAmp;
+    }
+
+    // 2. Try project amp
     const projectAmp = path.join(
       this.config.path,
       "node_modules",
       ".bin",
       "amp",
     );
-    return projectAmp;
+    if (fsSync.existsSync(projectAmp)) {
+      return projectAmp;
+    }
+
+    // 3. Fallback to global amp
+    return "amp";
   }
 
   /**
@@ -457,43 +470,30 @@ When the task is complete and quality checks pass:
 
     let fullResponse = "";
 
-    // ProcessEnv to strict Record<string, string> conversion
-    const initialEnv: Record<string, string> = {};
-    const env = Object.entries(process.env).reduce<Record<string, string>>(
-      (acc, [key, value]) => {
-        if (value !== undefined) {
-          acc[key] = value;
-        }
-        return acc;
-      },
-      initialEnv,
-    );
-
-    const ptyProcess = pty.spawn(this.getAmpBin(), ["--execute"], {
+    const ptyProcess = pty.spawn(this.getAmpBin(), ["--execute", prompt], {
       name: "xterm-color",
       cols: 120,
       rows: 40,
       cwd: this.config.path,
-      env,
     });
 
     return new Promise<string>((resolve, reject) => {
       ptyProcess.onData((data) => {
+        // Strip ANSI escape codes for cleaner logs if desired, but keep for debug
         fullResponse += data;
         process.stdout.write(data);
       });
 
-      // Write prompt to agent's stdin via pty
-      ptyProcess.write(prompt);
-      // We need to signal EOF if the agent expects it to start processing
-      // For Amp --execute, it might need a specific sequence or just wait
-      // Most PTY agents listen for the full input then start.
-      // Since we don't have a direct "end" for PTY stdin like child_process,
-      // we rely on the agent reading the prompt.
-
       ptyProcess.onExit(({ exitCode }) => {
         if (exitCode === 0) {
-          resolve(fullResponse);
+          // Remove ANSI codes from the final response to make JSON parsing easier
+          // Simple regex for basic ANSI codes
+          const cleanResponse = fullResponse.replace(
+            // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes are control characters
+            /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
+            "",
+          );
+          resolve(cleanResponse);
         } else {
           reject(new Error(`Amp PTY exited with code ${exitCode}`));
         }

@@ -28,10 +28,6 @@ export function useArtifact({
   });
 }
 
-interface UpdateArtifactInput {
-  content: string;
-}
-
 export function useUpdateArtifact() {
   const queryClient = useQueryClient();
 

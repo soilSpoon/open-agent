@@ -8,6 +8,7 @@ import {
   Terminal,
 } from "lucide-react";
 import Link from "next/link";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -29,6 +30,13 @@ export function ProjectDashboard({ children }: ProjectDashboardProps) {
   const { data: projects = [], isLoading } = useProjects();
   const selectedId = useSelectedProjectId();
   const setSelectedId = useProjectStore((state) => state.setSelectedProject);
+
+  // Auto-select first project if none selected and projects are available
+  useEffect(() => {
+    if (!selectedId && projects.length > 0) {
+      setSelectedId(projects[0].id);
+    }
+  }, [selectedId, projects, setSelectedId]);
 
   const handleProjectChange = (value: string | null) => {
     if (!value) return;
