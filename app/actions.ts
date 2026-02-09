@@ -21,6 +21,7 @@ import { validateChange } from "@/lib/openspec/validator";
 import { createIterationPersistence } from "@/lib/ralph/iteration";
 import type { IterationLog } from "@/lib/ralph/types";
 import { logs, projects, runs, tasks } from "@/lib/schema";
+import { ralphWorker } from "@/lib/worker";
 
 import { loadOpenSpecSchema } from "@/lib/openspec/schema-loader";
 
@@ -163,6 +164,9 @@ export async function startRalphRun(
     message: `Started Ralph run for change: ${changeId}`,
     timestamp: now,
   });
+
+  // Notify worker to process immediately
+  ralphWorker.notifyNewRun(runId);
 
   return runId;
 }

@@ -33,6 +33,7 @@ import {
 import { useProjects } from "@/features/projects/api/hooks/use-projects";
 import { useSelectedProjectId } from "@/features/projects/stores/project-store";
 import { useStartRalphRun } from "@/features/runs/api/hooks/use-start-ralph-run";
+import { useRalphEvents } from "@/features/runs/api/hooks/use-ralph-events";
 import type { OpenSpecChange } from "@/lib/openspec/types";
 import { useSettings } from "@/lib/settings-context";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,9 @@ export function ChangeDetail({
     activeRun,
     isLoading: isStatusLoading,
   } = useChangeStatus(changeId);
+
+  // Subscribe to real-time events if there is an active run
+  useRalphEvents(activeRun?.id);
 
   const { data: specFiles = [] } = useSpecs({
     changeId,

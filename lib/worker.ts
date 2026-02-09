@@ -4,6 +4,7 @@ import db from "./db";
 import { ProjectConfigSchema } from "./openspec/types";
 import { createRalphEngine, type RalphCallbacks } from "./ralph";
 import { logs, runs, tasks } from "./schema";
+import { workerEvents } from "./ralph/worker-events";
 
 /**
  * RalphWorker handles background task execution using a queue.
@@ -17,19 +18,24 @@ class RalphWorker {
     console.log("[RalphWorker] Initialized with concurrency 20");
   }
 
+  /**
+   * Notifies the worker of a new run to process immediately.
+   */
+  public notifyNewRun(runId: string) {
+    console.log(`[RalphWorker] Notified of new run: ${runId}`);
+    workerEvents.emit("event", { type: "run:new", runId });
+    this.processPendingRuns();
+  }
+
   public async start() {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
-    console.log("[RalphWorker] Starting task polling...");
-
-    setInterval(async () => {
-      try {
-        await this.processPendingRuns();
-      } catch (error: unknown) {
-        console.error("[RalphWorker] Error in polling loop:", error);
-      }
-    }, 5000);
+    console.log("[RalphWorker] Ready and listening for new runs via notifyNewRun()");
+    
+    // Polling loop removed in favor of event-based processing via notifyNewRun()
+    // Initial check for any pending runs on startup
+    await this.processPendingRuns();
   }
 
   private async processPendingRuns() {
@@ -51,11 +57,12 @@ class RalphWorker {
   }
 
   private async executeRalphLoop(run: typeof runs.$inferSelect) {
+    const runId = run.id; // local copy for callback safety
     // Double check inside queue
-    if (this.activeRunIds.has(run.id)) return;
-    this.activeRunIds.add(run.id);
+    if (this.activeRunIds.has(runId)) return;
+    this.activeRunIds.add(runId);
 
-    console.log(`[RalphWorker] [${run.id}] Starting execution loop (v2)`);
+    console.log(`[RalphWorker] [${runId}] Starting execution loop (v2)`);
 
     try {
       if (!run.projectConfig || !run.changeId) {
@@ -76,20 +83,31 @@ class RalphWorker {
       // Create callbacks
       const callbacks: RalphCallbacks = {
         onLog: async (level, message) => {
-          await this.log(run.id, level, `[Ralph] ${message}`);
+          await this.log(runId, level, `[Ralph] ${message}`);
         },
         onIterationComplete: async (iteration) => {
           await db
             .update(runs)
             .set({ currentIteration: iteration })
-            .where(eq(runs.id, run.id));
+            .where(eq(runs.id, runId));
+          workerEvents.emit("event", {
+            type: "run:status",
+            runId,
+            status: "running",
+          });
         },
         onTaskStart: async (taskId, title) => {
-          console.log(`[RalphWorker] [${run.id}] Task Start: ${taskId}`);
+          console.log(`[RalphWorker] [${runId}] Task Start: ${taskId}`);
+          workerEvents.emit("event", {
+            type: "task:start",
+            runId,
+            taskId,
+            title,
+          });
           await db
             .update(runs)
             .set({ lastTaskId: taskId })
-            .where(eq(runs.id, run.id));
+            .where(eq(runs.id, runId));
 
           const existingTask = await db.query.tasks.findFirst({
             where: eq(tasks.id, taskId),
@@ -102,7 +120,7 @@ class RalphWorker {
           } else {
             await db.insert(tasks).values({
               id: taskId,
-              runId: run.id,
+              runId: runId,
               title: title,
               status: "running",
             });
@@ -110,8 +128,14 @@ class RalphWorker {
         },
         onTaskComplete: async (taskId, success) => {
           console.log(
-            `[RalphWorker] [${run.id}] Task Complete: ${taskId} (success: ${success})`,
+            `[RalphWorker] [${runId}] Task Complete: ${taskId} (success: ${success})`,
           );
+          workerEvents.emit("event", {
+            type: "task:complete",
+            runId,
+            taskId,
+            success,
+          });
           await db
             .update(tasks)
             .set({
@@ -120,15 +144,20 @@ class RalphWorker {
             .where(eq(tasks.id, taskId));
         },
         onRunComplete: async (success, message) => {
-          console.log(`[RalphWorker] [${run.id}] Run Complete: ${message}`);
+          console.log(`[RalphWorker] [${runId}] Run Complete: ${message}`);
+          workerEvents.emit("event", {
+            type: "run:status",
+            runId,
+            status: success ? "completed" : "failed",
+          });
           await db
             .update(runs)
             .set({
               status: success ? "completed" : "failed",
             })
-            .where(eq(runs.id, run.id));
+            .where(eq(runs.id, runId));
           await this.log(
-            run.id,
+            runId,
             success ? "info" : "error",
             `Loop terminated: ${message}`,
           );
@@ -176,6 +205,7 @@ class RalphWorker {
     level: "info" | "warn" | "error",
     message: string,
   ) {
+    workerEvents.emit("event", { type: "log", runId, level, message });
     await db.insert(logs).values({
       runId,
       level,
