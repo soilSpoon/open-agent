@@ -10,16 +10,27 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type {
-  ErrorStrategy,
-  LockFile,
-  LockStatus,
-  SessionState,
-} from "./types.js";
-import { CURRENT_SCHEMA_VERSION } from "./types.js";
+import {
+  CURRENT_SCHEMA_VERSION,
+  type ErrorStrategy,
+  type LockFile,
+  LockFileSchema,
+  type LockStatus,
+  type SessionState,
+  SessionStateSchema,
+} from "./types";
 
 const SESSION_FILENAME = "session.json";
 const LOCK_FILENAME = ".lock";
+
+function isENOENT(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: unknown }).code === "ENOENT"
+  );
+}
 
 export interface SessionManagerOptions {
   changeId: string;
@@ -60,7 +71,7 @@ export class SessionManager {
   async readSession(): Promise<SessionState | null> {
     try {
       const content = await fs.readFile(this.sessionPath, "utf-8");
-      const session = JSON.parse(content) as SessionState;
+      const session = SessionStateSchema.parse(JSON.parse(content));
 
       // Schema migration check
       if (session.schemaVersion !== CURRENT_SCHEMA_VERSION) {
@@ -72,7 +83,7 @@ export class SessionManager {
 
       return session;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (isENOENT(error)) {
         return null;
       }
       throw error;
@@ -98,7 +109,7 @@ export class SessionManager {
     try {
       await fs.unlink(this.sessionPath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!isENOENT(error)) {
         throw error;
       }
     }
@@ -109,7 +120,7 @@ export class SessionManager {
   // ========================================================================
 
   createInitialState(): SessionState {
-    const now = new Date().toISOString();
+    const _now = new Date().toISOString();
 
     return {
       schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -152,7 +163,7 @@ export class SessionManager {
     try {
       await fs.unlink(this.lockPath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!isENOENT(error)) {
         throw error;
       }
     }
@@ -161,7 +172,7 @@ export class SessionManager {
   async checkLock(): Promise<LockStatus> {
     try {
       const content = await fs.readFile(this.lockPath, "utf-8");
-      const lock = JSON.parse(content) as LockFile;
+      const lock = LockFileSchema.parse(JSON.parse(content));
 
       // Check if process is still running
       const isRunning = await this.isProcessRunning(lock.pid);
@@ -180,7 +191,7 @@ export class SessionManager {
 
       return { status: "stale", lock };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (isENOENT(error)) {
         return { status: "free" };
       }
       throw error;

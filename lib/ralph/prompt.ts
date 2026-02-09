@@ -10,7 +10,7 @@
  * NOTE: Uses simple template strings (Handlebars optional for future enhancement)
  */
 
-import type { FailureAnalysis, IterationLog, SessionState } from "./types.js";
+import type { FailureAnalysis, IterationLog, SessionState } from "./types";
 
 export interface PromptEngineOptions {
   projectName: string;
@@ -29,7 +29,7 @@ export interface TemplateVariables {
   // Project context
   projectName: string;
   projectPath: string;
-  checkCommand: string;
+  checkCommand?: string;
 
   // Spec context
   specContext: string;
@@ -58,10 +58,7 @@ export class PromptTemplateEngine {
   private options: PromptEngineOptions;
 
   constructor(options: PromptEngineOptions) {
-    this.options = {
-      checkCommand: "bun run check",
-      ...options,
-    };
+    this.options = options;
   }
 
   /**
@@ -91,7 +88,7 @@ export class PromptTemplateEngine {
       maxIterations: session.maxIterations,
       projectName: this.options.projectName,
       projectPath: this.options.projectPath,
-      checkCommand: this.options.checkCommand!,
+      checkCommand: this.options.checkCommand,
       specContext,
       recentFailures,
       hasRecentFailures: recentFailures.length > 0,
@@ -130,18 +127,19 @@ export class PromptTemplateEngine {
     parts.push(`- **Quality Check**: \`${v.checkCommand}\``);
     parts.push("");
 
-    // Failure Context (KEY SECTION)
+    // Previous Iterations Context
     if (v.hasRecentFailures) {
-      parts.push("## ⚠️ PREVIOUS FAILURE ANALYSIS (CRITICAL - READ THIS FIRST)");
+      parts.push("## Previous Iterations Context");
+      parts.push("");
+      parts.push("Recent attempts for this task:");
       parts.push("");
       v.recentFailures.forEach((failure, idx) => {
-        parts.push(`### Previous Attempt ${idx + 1}`);
+        parts.push(`### Attempt ${idx + 1}`);
         parts.push(`- **Root Cause**: ${failure.rootCause}`);
-        parts.push(`- **Fix Plan**: ${failure.fixPlan}`);
+        parts.push(`- **Suggested Fix**: ${failure.fixPlan}`);
         parts.push(`- **Error**: ${failure.errorMessage}`);
         parts.push("");
       });
-      parts.push("**You MUST address the root cause above to succeed.**");
       parts.push("");
     }
 

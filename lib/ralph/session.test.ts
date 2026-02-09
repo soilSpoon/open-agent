@@ -5,8 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { createSessionManager, type SessionManager } from "./session.js";
-import type { SessionState } from "./types.js";
+import { createSessionManager, type SessionManager } from "./session";
 
 const TEST_DIR = path.join(process.cwd(), ".test-ralph-session");
 
@@ -59,7 +58,7 @@ describe("SessionManager", () => {
     it("should create initial state with correct defaults", () => {
       const state = manager.createInitialState();
 
-      expect(state.schemaVersion).toBe(1);
+      expect(state.schemaVersion).toBe(2);
       expect(state.status).toBe("running");
       expect(state.iteration).toBe(0);
       expect(state.maxIterations).toBe(10);
@@ -82,9 +81,9 @@ describe("SessionManager", () => {
 
       const readState = await manager.readSession();
       expect(readState).not.toBeNull();
-      expect(readState!.iteration).toBe(5);
-      expect(readState!.currentTask!.id).toBe("task-1");
-      expect(readState!.currentTask!.attemptCount).toBe(2);
+      expect(readState?.iteration).toBe(5);
+      expect(readState?.currentTask?.id).toBe("task-1");
+      expect(readState?.currentTask?.attemptCount).toBe(2);
     });
 
     it("should return null when session does not exist", async () => {

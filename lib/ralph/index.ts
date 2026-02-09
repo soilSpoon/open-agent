@@ -4,17 +4,20 @@
  * A robust, file-based session and iteration persistence system for AI agent loops.
  *
  * Key Features:
- * - Immutable iteration logs (append-only JSON)
+ * - Immutable iteration logs (append-only JSONL)
  * - Atomic file operations (crash-safe)
  * - Failure context propagation across retries
  * - Concurrency control via lock files
- * - Derived progress.md generation
+ * - Dual-gate verification with evidence
+ * - Flexible output parsing (JSON → regex → raw)
  *
  * Architecture:
- * - types.ts    : Core type definitions and schemas
- * - session.ts  : Session state management and locking
- * - iteration.ts: Iteration log persistence and progress generation
- * - prompt.ts   : Handlebars-based prompt templates
+ * - types.ts     : Core type definitions and schemas
+ * - session.ts   : Session state management and locking
+ * - iteration.ts : Iteration log persistence (JSONL format)
+ * - extraction.ts: Flexible output parsing
+ * - prompt.ts    : Prompt template generation
+ * - engine.ts    : Main execution engine
  */
 
 // ============================================================================
@@ -38,7 +41,7 @@ export {
   // Core interfaces
   type SessionState,
   type SessionStatus,
-} from "./types.js";
+} from "./types";
 
 // ============================================================================
 // Session Management
@@ -48,7 +51,7 @@ export {
   createSessionManager,
   SessionManager,
   type SessionManagerOptions,
-} from "./session.js";
+} from "./session";
 
 // ============================================================================
 // Iteration Persistence
@@ -58,7 +61,7 @@ export {
   createIterationPersistence,
   IterationPersistence,
   type IterationPersistenceOptions,
-} from "./iteration.js";
+} from "./iteration";
 
 // ============================================================================
 // Prompt Templates
@@ -69,10 +72,22 @@ export {
   type PromptEngineOptions,
   PromptTemplateEngine,
   type TemplateVariables,
-} from "./prompt.js";
+} from "./prompt";
 
 // ============================================================================
-// Engine (v2)
+// Output Extraction
+// ============================================================================
+
+export {
+  type ExtractedFailureAnalysis,
+  type ExtractedIterationData,
+  extractFailureAnalysis,
+  extractFromOutput,
+  SUMMARY_PATTERNS,
+} from "./extraction";
+
+// ============================================================================
+// Engine
 // ============================================================================
 
 export {
@@ -81,7 +96,7 @@ export {
   type RalphCallbacks,
   RalphEngine,
   type RalphEngineOptions,
-} from "./engine.js";
+} from "./engine";
 
 // ============================================================================
 // Utility Functions

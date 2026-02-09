@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { createPromptEngine, PromptTemplateEngine } from "./prompt.js";
-import type { IterationLog, SessionState } from "./types.js";
+import { createPromptEngine } from "./prompt";
+import type { IterationLog, SessionState } from "./types";
 
 describe("PromptTemplateEngine", () => {
   const engine = createPromptEngine({
@@ -16,7 +16,7 @@ describe("PromptTemplateEngine", () => {
   describe("buildVariables", () => {
     it("should build variables from session", () => {
       const session: SessionState = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         sessionId: "sess-test",
         changeId: "test-change",
         status: "running",
@@ -61,7 +61,7 @@ describe("PromptTemplateEngine", () => {
 
     it("should handle empty failures and patterns", () => {
       const session: SessionState = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         sessionId: "sess-test",
         changeId: "test-change",
         status: "running",
@@ -121,10 +121,9 @@ describe("PromptTemplateEngine", () => {
 
       const prompt = engine.generateMainPrompt(vars);
 
-      expect(prompt).toContain("PREVIOUS FAILURE ANALYSIS");
+      expect(prompt).toContain("Previous Iterations Context");
       expect(prompt).toContain("Import error");
       expect(prompt).toContain("Add missing import");
-      expect(prompt).toContain("You MUST address the root cause");
     });
 
     it("should include codebase patterns when they exist", () => {
@@ -210,7 +209,7 @@ describe("PromptTemplateEngine", () => {
   describe("generateAnalysisPrompt", () => {
     it("should include error message and context", () => {
       const session: SessionState = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         sessionId: "sess-test",
         changeId: "test-change",
         status: "running",
@@ -245,7 +244,7 @@ describe("PromptTemplateEngine", () => {
 
     it("should include previous failure context when provided", () => {
       const session: SessionState = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         sessionId: "sess-test",
         changeId: "test-change",
         status: "running",

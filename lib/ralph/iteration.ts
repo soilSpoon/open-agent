@@ -2,73 +2,111 @@
  * Ralph Iteration Persistence
  *
  * Manages immutable iteration logs:
- * - Append-only JSON files
- * - Atomic writes
- * - Progress.md generation (derived)
+ * - JSONL format (line-by-line JSON for AI-native parsing)
+ * - Atomic writes with YAML frontmatter metadata
+ * - File naming: {sessionId.slice(0,8)}_{timestamp}_{taskId}.log
+ * - Progress.md support (optional, agent-written)
  */
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type {
-  FailureAnalysis,
-  IterationLog,
-  IterationStatus,
-} from "./types.js";
-import { CURRENT_SCHEMA_VERSION } from "./types.js";
+import {
+  CURRENT_SCHEMA_VERSION,
+  type FailureAnalysis,
+  type IterationLog,
+  IterationLogSchema,
+  IterationStatusSchema,
+} from "./types";
+
+function isENOENT(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: unknown }).code === "ENOENT"
+  );
+}
 
 export interface IterationPersistenceOptions {
   iterationsDir: string;
   ralphDir: string;
+  sessionId: string;
+}
+
+/**
+ * Iteration log metadata from YAML frontmatter
+ */
+export interface IterationLogMetadata {
+  iteration: number;
+  taskId: string;
+  status: string;
+  startedAt: string;
+  completedAt?: string;
+  sessionId: string;
+}
+
+/**
+ * Iteration log file info for listing
+ */
+export interface IterationLogInfo {
+  filename: string;
+  filepath: string;
+  metadata: IterationLogMetadata;
+  sizeBytes: number;
+  modifiedAt: Date;
 }
 
 export class IterationPersistence {
   private iterationsDir: string;
   private progressPath: string;
+  private sessionId: string;
 
   constructor(options: IterationPersistenceOptions) {
     this.iterationsDir = options.iterationsDir;
     this.progressPath = path.join(options.ralphDir, "progress.md");
+    this.sessionId = options.sessionId;
   }
 
   // ========================================================================
-  // Iteration Log CRUD (Immutable)
+  // Iteration Log CRUD (JSONL Format)
   // ========================================================================
 
   /**
-   * Save a new iteration log (append-only, never modify)
+   * Save a new iteration log (JSONL format with YAML frontmatter)
+   * File naming: {sessionId.slice(0,8)}_{timestamp}_{taskId}.log
    */
-  async saveIteration(log: IterationLog): Promise<void> {
-    const filename = this.getIterationFilename(log.iteration);
+  async saveIteration(log: IterationLog): Promise<string> {
+    const filename = this.generateFilename(log);
     const filepath = path.join(this.iterationsDir, filename);
 
-    // Ensure schema version is set
-    const logWithVersion = {
-      ...log,
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-    };
+    // Build JSONL content with YAML frontmatter
+    const content = this.formatIterationLog(log);
 
     // Atomic write
     const tempPath = `${filepath}.tmp`;
-    await fs.writeFile(
-      tempPath,
-      JSON.stringify(logWithVersion, null, 2),
-      "utf-8",
-    );
+    await fs.writeFile(tempPath, content, "utf-8");
+
+    // Ensure data is flushed to disk
+    const handle = await fs.open(tempPath, "r+");
+    await handle.sync();
+    await handle.close();
+
     await fs.rename(tempPath, filepath);
+
+    return filename;
   }
 
   /**
-   * Read a specific iteration log
+   * Read a specific iteration log by filename
    */
-  async readIteration(iteration: number): Promise<IterationLog | null> {
-    const filename = this.getIterationFilename(iteration);
+  async readIteration(filename: string): Promise<IterationLog | null> {
     const filepath = path.join(this.iterationsDir, filename);
 
     try {
       const content = await fs.readFile(filepath, "utf-8");
-      return JSON.parse(content) as IterationLog;
+      return this.parseIterationLog(content, filename);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (isENOENT(error)) {
         return null;
       }
       throw error;
@@ -76,78 +114,129 @@ export class IterationPersistence {
   }
 
   /**
-   * List all iteration numbers (sorted)
+   * Read iteration log by iteration number (finds matching file)
    */
-  async listIterations(): Promise<number[]> {
+  async readIterationByNumber(iteration: number): Promise<IterationLog | null> {
+    const logs = await this.listIterationLogs();
+    const match = logs.find((l) => l.metadata.iteration === iteration);
+    if (!match) return null;
+    return this.readIteration(match.filename);
+  }
+
+  // ========================================================================
+  // Listing and Filtering (US-005)
+  // ========================================================================
+
+  /**
+   * List all iteration logs with metadata
+   */
+  async listIterationLogs(): Promise<IterationLogInfo[]> {
     try {
       const files = await fs.readdir(this.iterationsDir);
-      const iterations = files
-        .filter((f) => f.endsWith(".json"))
-        .map((f) => parseInt(f.replace(".json", ""), 10))
-        .filter((n) => !isNaN(n))
-        .sort((a, b) => a - b);
-      return iterations;
+      const logFiles = files.filter((f) => f.endsWith(".log"));
+
+      const infos: IterationLogInfo[] = [];
+      for (const filename of logFiles) {
+        const info = await this.getLogInfo(filename);
+        if (info) infos.push(info);
+      }
+
+      // Sort by iteration number
+      return infos.sort((a, b) => a.metadata.iteration - b.metadata.iteration);
     } catch {
       return [];
     }
   }
 
   /**
-   * Read the most recent N iterations
+   * Load iteration logs with filtering options
    */
-  async readRecentIterations(count: number): Promise<IterationLog[]> {
-    const allIterations = await this.listIterations();
-    const recent = allIterations.slice(-count);
+  async loadIterationLogs(
+    options: {
+      taskId?: string;
+      status?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<IterationLog[]> {
+    let logs = await this.listIterationLogs();
 
-    const logs: IterationLog[] = [];
-    for (const iter of recent) {
-      const log = await this.readIteration(iter);
-      if (log) logs.push(log);
+    // Apply filters
+    if (options.taskId) {
+      logs = logs.filter((l) => l.metadata.taskId === options.taskId);
     }
-    return logs;
+    if (options.status) {
+      logs = logs.filter((l) => l.metadata.status === options.status);
+    }
+
+    // Apply pagination
+    const offset = options.offset ?? 0;
+    const limit = options.limit ?? logs.length;
+    const paginated = logs.slice(offset, offset + limit);
+
+    // Load full content
+    const results: IterationLog[] = [];
+    for (const info of paginated) {
+      const log = await this.readIteration(info.filename);
+      if (log) results.push(log);
+    }
+
+    return results;
   }
+
+  /**
+   * Get recent progress summary (last N iterations)
+   */
+  async getRecentProgressSummary(count: number = 5): Promise<{
+    iterations: IterationLog[];
+    summary: string;
+    stats: {
+      total: number;
+      success: number;
+      failed: number;
+      inProgress: number;
+    };
+  }> {
+    const logs = await this.listIterationLogs();
+    const recent = logs.slice(-count);
+
+    const iterations: IterationLog[] = [];
+    for (const info of recent) {
+      const log = await this.readIteration(info.filename);
+      if (log) iterations.push(log);
+    }
+
+    // Calculate stats
+    const allLogs = await this.loadIterationLogs();
+    const stats = {
+      total: allLogs.length,
+      success: allLogs.filter((l) => l.status === "success").length,
+      failed: allLogs.filter((l) => l.status === "failed").length,
+      inProgress: allLogs.filter((l) => l.status === "in_progress").length,
+    };
+
+    // Generate summary text
+    const summary = this.generateSummaryText(iterations, stats);
+
+    return { iterations, summary, stats };
+  }
+
+  // ========================================================================
+  // Task-based Queries
+  // ========================================================================
 
   /**
    * Read all iterations for a specific task
    */
   async readTaskIterations(taskId: string): Promise<IterationLog[]> {
-    const allIterations = await this.listIterations();
-    const logs: IterationLog[] = [];
-
-    for (const iter of allIterations) {
-      const log = await this.readIteration(iter);
-      if (log && log.taskId === taskId) {
-        logs.push(log);
-      }
-    }
-    return logs;
+    return this.loadIterationLogs({ taskId });
   }
 
-  // ========================================================================
-  // Failure Analysis Helpers
-  // ========================================================================
-
   /**
-   * Extract failure analysis from the most recent failed iteration
+   * Read recent iterations across all tasks
    */
-  async getLastFailure(): Promise<
-    | (IterationLog & {
-        failureAnalysis: NonNullable<IterationLog["failureAnalysis"]>;
-      })
-    | null
-  > {
-    const allIterations = await this.listIterations();
-
-    // Search backwards for failed iteration with analysis
-    for (let i = allIterations.length - 1; i >= 0; i--) {
-      const log = await this.readIteration(allIterations[i]);
-      if (log && log.status === "failed" && log.failureAnalysis) {
-        return log as IterationLog & {
-          failureAnalysis: NonNullable<IterationLog["failureAnalysis"]>;
-        };
-      }
-    }
-    return null;
+  async readRecentIterations(count: number = 5): Promise<IterationLog[]> {
+    return this.loadIterationLogs({ limit: count });
   }
 
   /**
@@ -159,120 +248,460 @@ export class IterationPersistence {
   ): Promise<FailureAnalysis[]> {
     const taskLogs = await this.readTaskIterations(taskId);
     const failures = taskLogs
-      .filter((log) => log.status === "failed" && log.failureAnalysis)
+      .filter(
+        (
+          log,
+        ): log is IterationLog & {
+          failureAnalysis: NonNullable<IterationLog["failureAnalysis"]>;
+        } => log.status === "failed" && !!log.failureAnalysis,
+      )
       .slice(-maxAttempts)
-      .map((log) => log.failureAnalysis!);
+      .map((log) => log.failureAnalysis);
     return failures;
   }
 
+  /**
+   * Extract failure analysis from the most recent failed iteration
+   */
+  async getLastFailure(): Promise<
+    | (IterationLog & {
+        failureAnalysis: NonNullable<IterationLog["failureAnalysis"]>;
+      })
+    | null
+  > {
+    const logs = await this.listIterationLogs();
+
+    // Search backwards for failed iteration with analysis
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const log = await this.readIteration(logs[i].filename);
+      if (log && log.status === "failed" && log.failureAnalysis) {
+        return { ...log, failureAnalysis: log.failureAnalysis };
+      }
+    }
+    return null;
+  }
+
   // ========================================================================
-  // Progress.md Generation (Derived)
+  // Progress.md Support (US-006 - Optional, Agent-written)
   // ========================================================================
 
   /**
-   * Regenerate progress.md from iteration logs
+   * Read progress.md if it exists (agent-written)
    */
-  async generateProgress(): Promise<string> {
-    const iterations = await this.listIterations();
-    const logs: IterationLog[] = [];
-
-    for (const iter of iterations) {
-      const log = await this.readIteration(iter);
-      if (log) logs.push(log);
+  async readProgressMd(): Promise<string | null> {
+    try {
+      return await fs.readFile(this.progressPath, "utf-8");
+    } catch (error) {
+      if (isENOENT(error)) {
+        return null;
+      }
+      throw error;
     }
-
-    const content = this.formatProgressMarkdown(logs);
-    await fs.writeFile(this.progressPath, content, "utf-8");
-    return content;
   }
 
-  private formatProgressMarkdown(logs: IterationLog[]): string {
-    const lines: string[] = [
-      "# Ralph Progress Log",
-      "",
-      "Auto-generated from iteration logs. **DO NOT EDIT DIRECTLY** - will be overwritten.",
-      "",
-      `Generated: ${new Date().toISOString()}`,
-      `Total iterations: ${logs.length}`,
-      "",
-      "## Summary",
-      "",
-    ];
+  /**
+   * Write progress.md (for agent to update)
+   */
+  async writeProgressMd(content: string): Promise<void> {
+    const tempPath = `${this.progressPath}.tmp`;
+    await fs.writeFile(tempPath, content, "utf-8");
+    await fs.rename(tempPath, this.progressPath);
+  }
 
-    // Calculate stats
-    const successes = logs.filter((l) => l.status === "success").length;
-    const failures = logs.filter((l) => l.status === "failed").length;
-    lines.push(`- ✓ Successes: ${successes}`);
-    lines.push(`- ✗ Failures: ${failures}`);
-    lines.push("");
+  /**
+   * Extract codebase patterns from progress.md
+   */
+  async extractCodebasePatterns(): Promise<string[]> {
+    const content = await this.readProgressMd();
+    if (!content) return [];
 
-    // Accumulated patterns
-    const allPatterns = new Set<string>();
-    logs.forEach((l) => l.codebasePatterns?.forEach((p) => allPatterns.add(p)));
-    if (allPatterns.size > 0) {
-      lines.push("## Codebase Patterns (Study These First)");
-      lines.push("");
-      allPatterns.forEach((p) => lines.push(`- ${p}`));
-      lines.push("");
+    // Match "## Codebase Patterns" section
+    const pattern = /##\s*Codebase Patterns.*?\n([^#]+)/i;
+    const match = content.match(pattern);
+    if (!match?.[1]) return [];
+
+    // Extract list items
+    return match[1]
+      .split("\n")
+      .map((line) => line.replace(/^[-*]\s*/, "").trim())
+      .filter((line) => line.length > 0);
+  }
+
+  // ========================================================================
+  // Log Retention and Cleanup
+  // ========================================================================
+
+  /**
+   * Cleanup old iteration logs (default: keep 50 iterations or 30 days)
+   */
+  async cleanupIterationLogs(
+    options: {
+      maxIterations?: number;
+      maxAgeDays?: number;
+      dryRun?: boolean;
+    } = {},
+  ): Promise<{
+    deleted: string[];
+    archived: string[];
+    kept: string[];
+  }> {
+    const maxIterations = options.maxIterations ?? 50;
+    const maxAgeDays = options.maxAgeDays ?? 30;
+    const dryRun = options.dryRun ?? false;
+
+    const logs = await this.listIterationLogs();
+    const now = Date.now();
+    const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+
+    const toDelete: IterationLogInfo[] = [];
+    const toArchive: IterationLogInfo[] = [];
+    const toKeep: IterationLogInfo[] = [];
+
+    // Sort by modification time (oldest first)
+    const sorted = [...logs].sort(
+      (a, b) => a.modifiedAt.getTime() - b.modifiedAt.getTime(),
+    );
+
+    for (let i = 0; i < sorted.length; i++) {
+      const log = sorted[i];
+      const age = now - log.modifiedAt.getTime();
+
+      // Keep recent N iterations
+      if (sorted.length - i <= maxIterations) {
+        toKeep.push(log);
+        continue;
+      }
+
+      // Archive if within age limit
+      if (age < maxAgeMs) {
+        toArchive.push(log);
+      } else {
+        toDelete.push(log);
+      }
     }
 
-    // Recent iterations (last 5)
-    lines.push("## Recent Iterations");
+    const result = {
+      deleted: toDelete.map((l) => l.filename),
+      archived: toArchive.map((l) => l.filename),
+      kept: toKeep.map((l) => l.filename),
+    };
+
+    if (dryRun) {
+      return result;
+    }
+
+    // Create archive directory
+    const archiveDir = path.join(this.iterationsDir, "archive");
+    await fs.mkdir(archiveDir, { recursive: true });
+
+    // Archive old logs
+    for (const log of toArchive) {
+      const src = log.filepath;
+      const dst = path.join(archiveDir, log.filename);
+      await fs.rename(src, dst);
+    }
+
+    // Delete very old logs
+    for (const log of toDelete) {
+      await fs.unlink(log.filepath);
+    }
+
+    return result;
+  }
+
+  // ========================================================================
+  // Internal Formatting and Parsing
+  // ========================================================================
+
+  /**
+   * Format iteration log as JSONL with YAML frontmatter
+   */
+  private formatIterationLog(log: IterationLog): string {
+    const lines: string[] = [];
+
+    // YAML frontmatter metadata
+    lines.push("---");
+    lines.push(`iteration: ${log.iteration}`);
+    lines.push(`taskId: "${log.taskId}"`);
+    lines.push(`status: "${log.status}"`);
+    lines.push(`sessionId: "${log.sessionId}"`);
+    lines.push(`startedAt: "${log.timestamp}"`);
+    if (log.durationMs) {
+      const completedAt = new Date(
+        new Date(log.timestamp).getTime() + log.durationMs,
+      ).toISOString();
+      lines.push(`completedAt: "${completedAt}"`);
+    }
+    lines.push("---");
     lines.push("");
 
-    const recent = logs.slice(-5).reverse();
-    for (const log of recent) {
-      const icon = log.status === "success" ? "✓" : "✗";
-      lines.push(
-        `### ${icon} Iteration ${log.iteration} - Task ${log.taskId} (Attempt ${log.taskAttempt})`,
-      );
-      lines.push("");
-      lines.push(`- **Status**: ${log.status}`);
-      lines.push(`- **Timestamp**: ${log.timestamp}`);
-      lines.push(`- **Duration**: ${(log.durationMs / 1000).toFixed(1)}s`);
-      if (log.threadId) {
-        lines.push(`- **Thread**: https://ampcode.com/threads/${log.threadId}`);
-      }
-      lines.push("");
+    // Main JSONL content
+    const mainLog = {
+      schemaVersion: log.schemaVersion ?? CURRENT_SCHEMA_VERSION,
+      sessionId: log.sessionId,
+      iteration: log.iteration,
+      taskId: log.taskId,
+      taskAttempt: log.taskAttempt,
+      timestamp: log.timestamp,
+      threadId: log.threadId,
+      status: log.status,
+      promptTokens: log.promptTokens,
+      agentClaimedComplete: log.agentClaimedComplete,
+      verificationEvidence: log.verificationEvidence,
+      context: log.context,
+      implemented: log.implemented,
+      codebasePatterns: log.codebasePatterns,
+      summary: log.summary,
+      failureAnalysis: log.failureAnalysis,
+      commitBefore: log.commitBefore,
+      commitAfter: log.commitAfter,
+      durationMs: log.durationMs,
+    };
 
-      if (log.status === "success" && log.summary) {
-        lines.push("**Summary**: " + log.summary);
-        lines.push("");
-        if (log.implemented && log.implemented.length > 0) {
-          lines.push("**Implemented**:");
-          log.implemented.forEach((item) => lines.push(`- ${item}`));
-          lines.push("");
-        }
-      }
+    lines.push(JSON.stringify(mainLog));
 
-      if (log.status === "failed" && log.failureAnalysis) {
-        lines.push("**Failure Analysis**:");
-        lines.push(`- **Root Cause**: ${log.failureAnalysis.rootCause}`);
-        lines.push(`- **Fix Plan**: ${log.failureAnalysis.fixPlan}`);
-        lines.push(`- **Error Type**: ${log.failureAnalysis.errorType}`);
-        lines.push("");
-      }
+    // Raw output as separate line if present
+    if (log.rawOutput) {
+      lines.push("");
+      lines.push("--- RAW OUTPUT ---");
+      lines.push(log.rawOutput);
     }
 
     return lines.join("\n");
   }
 
-  // ========================================================================
-  // Utilities
-  // ========================================================================
+  /**
+   * Parse iteration log from file content
+   */
+  private parseIterationLog(
+    content: string,
+    filename: string,
+  ): IterationLog | null {
+    try {
+      // Split frontmatter and content
+      const frontmatterMatch = content.match(
+        /^---\n([\s\S]*?)\n---\n([\s\S]*)$/,
+      );
+      if (!frontmatterMatch) {
+        // Try to parse as plain JSONL (no frontmatter)
+        return this.parsePlainJsonl(content, filename);
+      }
 
-  private getIterationFilename(iteration: number): string {
-    // Zero-padded for sorting: 0001.json, 0002.json, etc.
-    return iteration.toString().padStart(4, "0") + ".json";
+      const frontmatter = frontmatterMatch[1];
+      const body = frontmatterMatch[2];
+
+      // Parse frontmatter
+      const metadata = this.parseFrontmatter(frontmatter);
+
+      // Find JSON line (first non-empty line after frontmatter)
+      const lines = body.split("\n");
+      let jsonLine = "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("---")) {
+          jsonLine = trimmed;
+          break;
+        }
+      }
+
+      if (!jsonLine) {
+        return null;
+      }
+
+      const raw = JSON.parse(jsonLine);
+      if (typeof raw !== "object" || raw === null) return null;
+      const parsed: Record<string, unknown> = raw;
+
+      // Extract raw output if present
+      const rawMatch = body.match(/--- RAW OUTPUT ---\n([\s\S]*)$/);
+      if (rawMatch?.[1]) {
+        parsed.rawOutput = rawMatch[1].trim();
+      }
+
+      // Safe status parsing
+      const statusResult = IterationStatusSchema.safeParse(metadata.status);
+      const status = statusResult.success
+        ? statusResult.data
+        : parsed.status || "in_progress";
+
+      const candidate = {
+        ...parsed,
+        schemaVersion: parsed.schemaVersion ?? CURRENT_SCHEMA_VERSION,
+        sessionId: metadata.sessionId || parsed.sessionId || "unknown",
+        iteration: metadata.iteration || parsed.iteration || 0,
+        taskId: metadata.taskId || parsed.taskId || "unknown",
+        status,
+        timestamp:
+          metadata.startedAt || parsed.timestamp || new Date().toISOString(),
+        // Defaults for required fields that might be missing in older logs or partial writes
+        taskAttempt: parsed.taskAttempt ?? 1,
+        agentClaimedComplete: parsed.agentClaimedComplete ?? false,
+        durationMs: parsed.durationMs ?? 0,
+      };
+
+      return IterationLogSchema.parse(candidate);
+    } catch {
+      return null;
+    }
   }
 
   /**
-   * Get the next iteration number
+   * Parse plain JSONL without frontmatter
    */
-  async getNextIterationNumber(): Promise<number> {
-    const iterations = await this.listIterations();
-    if (iterations.length === 0) return 1;
-    return Math.max(...iterations) + 1;
+  private parsePlainJsonl(
+    content: string,
+    filename: string,
+  ): IterationLog | null {
+    try {
+      const lines = content.split("\n").filter((l) => l.trim());
+      if (lines.length === 0) return null;
+
+      const raw = JSON.parse(lines[0]);
+      if (typeof raw !== "object" || raw === null) return null;
+
+      const parsed: Record<string, unknown> = raw;
+
+      // Try to extract metadata from filename
+      const filenameMatch = filename.match(/^(.+?)_(\d+)_(.+)\.log$/);
+      if (filenameMatch) {
+        const [, sessionPart, timestamp, taskId] = filenameMatch;
+        parsed.sessionId = parsed.sessionId || sessionPart;
+        parsed.taskId = parsed.taskId || taskId;
+        if (!parsed.timestamp && timestamp) {
+          parsed.timestamp = new Date(Number(timestamp)).toISOString();
+        }
+      }
+
+      const candidate = {
+        ...parsed,
+        schemaVersion: parsed.schemaVersion ?? CURRENT_SCHEMA_VERSION,
+        iteration: parsed.iteration ?? 0,
+        taskAttempt: parsed.taskAttempt ?? 1,
+        agentClaimedComplete: parsed.agentClaimedComplete ?? false,
+        durationMs: parsed.durationMs ?? 0,
+        status: parsed.status || "in_progress",
+      };
+
+      return IterationLogSchema.parse(candidate);
+    } catch {
+      return null;
+    }
+  }
+
+  private parseFrontmatter(frontmatter: string): Partial<IterationLogMetadata> {
+    const result: Partial<IterationLogMetadata> = {};
+    const lines = frontmatter.split("\n");
+
+    for (const line of lines) {
+      const match = line.match(/^([^:]+):\s*(.+)$/);
+      if (match) {
+        const [, key, value] = match;
+        const trimmed = value.replace(/^["']|["']$/g, "");
+
+        if (key === "iteration") result.iteration = Number(trimmed);
+        else if (key === "taskId") result.taskId = trimmed;
+        else if (key === "status") result.status = trimmed;
+        else if (key === "startedAt") result.startedAt = trimmed;
+        else if (key === "completedAt") result.completedAt = trimmed;
+        else if (key === "sessionId") result.sessionId = trimmed;
+      }
+    }
+
+    return result;
+  }
+
+  private generateFilename(log: IterationLog): string {
+    const sessionPrefix = log.sessionId.slice(0, 8);
+    const timestamp = new Date(log.timestamp).getTime();
+    const safeTaskId = log.taskId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    return `${sessionPrefix}_${timestamp}_${safeTaskId}.log`;
+  }
+
+  private async getLogInfo(filename: string): Promise<IterationLogInfo | null> {
+    const filepath = path.join(this.iterationsDir, filename);
+
+    try {
+      const stats = await fs.stat(filepath);
+      const content = await fs.readFile(filepath, "utf-8");
+
+      // Extract frontmatter
+      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      const metadataPartial = frontmatterMatch
+        ? this.parseFrontmatter(frontmatterMatch[1])
+        : this.extractMetadataFromFilename(filename);
+
+      const metadata: IterationLogMetadata = {
+        iteration: metadataPartial.iteration ?? 0,
+        taskId: metadataPartial.taskId ?? "unknown",
+        status: metadataPartial.status ?? "unknown",
+        startedAt:
+          metadataPartial.startedAt ?? new Date(stats.mtime).toISOString(),
+        sessionId: metadataPartial.sessionId ?? "unknown",
+        completedAt: metadataPartial.completedAt,
+      };
+
+      return {
+        filename,
+        filepath,
+        metadata,
+        sizeBytes: stats.size,
+        modifiedAt: stats.mtime,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private extractMetadataFromFilename(filename: string): IterationLogMetadata {
+    const match = filename.match(/^(.+?)_(\d+)_(.+)\.log$/);
+    if (match) {
+      const [, sessionId, timestamp, taskId] = match;
+      return {
+        sessionId: sessionId || "unknown",
+        iteration: 0,
+        taskId: taskId || "unknown",
+        status: "unknown",
+        startedAt: new Date(Number(timestamp)).toISOString(),
+      };
+    }
+
+    return {
+      sessionId: this.sessionId,
+      iteration: 0,
+      taskId: "unknown",
+      status: "unknown",
+      startedAt: new Date().toISOString(),
+    };
+  }
+
+  private generateSummaryText(
+    iterations: IterationLog[],
+    stats: {
+      total: number;
+      success: number;
+      failed: number;
+      inProgress: number;
+    },
+  ): string {
+    const lines: string[] = [
+      `Recent iterations: ${iterations.length}`,
+      `Total: ${stats.total} (✓ ${stats.success}, ✗ ${stats.failed}, ⏳ ${stats.inProgress})`,
+      "",
+    ];
+
+    for (const log of iterations.slice(-5)) {
+      const icon =
+        log.status === "success" ? "✓" : log.status === "failed" ? "✗" : "⏳";
+      lines.push(
+        `${icon} Iteration ${log.iteration}: ${log.taskId} - ${log.summary || "No summary"}`,
+      );
+
+      if (log.status === "failed" && log.failureAnalysis) {
+        lines.push(`  → Failed: ${log.failureAnalysis.rootCause}`);
+      }
+    }
+
+    return lines.join("\n");
   }
 }
 

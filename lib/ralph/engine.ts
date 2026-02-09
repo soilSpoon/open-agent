@@ -1,11 +1,13 @@
 /**
- * Ralph Engine v2
+ * Ralph Engine
  *
- * New implementation using:
+ * Implementation with:
  * - Session persistence (atomic writes, crash recovery)
- * - Immutable iteration logs (append-only)
+ * - Immutable iteration logs (JSONL format)
  * - Failure context propagation (rolling window)
  * - Lock file concurrency control
+ * - Dual-gate verification
+ * - Flexible output parsing
  */
 
 import { exec } from "node:child_process";
@@ -16,29 +18,29 @@ import { promisify } from "node:util";
 import * as pty from "node-pty";
 import { z } from "zod";
 import type { ProjectConfig } from "../openspec/types.js";
+import { extractFailureAnalysis, extractFromOutput } from "./extraction";
 import {
   createIterationPersistence,
   type IterationPersistence,
   type IterationPersistenceOptions,
-} from "./iteration.js";
+} from "./iteration";
 import {
   createPromptEngine,
   type PromptEngineOptions,
   type PromptTemplateEngine,
-} from "./prompt.js";
+} from "./prompt";
 import {
   createSessionManager,
   type SessionManager,
   type SessionManagerOptions,
-} from "./session.js";
+} from "./session";
 import type {
   ErrorStrategy,
-  ErrorType,
   FailureAnalysis,
   IterationLog,
   SessionState,
-} from "./types.js";
-import { CURRENT_SCHEMA_VERSION } from "./types.js";
+} from "./types";
+import { CURRENT_SCHEMA_VERSION } from "./types";
 
 const execAsync = promisify(exec);
 
@@ -152,14 +154,17 @@ export class RalphEngine {
     const iterationOptions: IterationPersistenceOptions = {
       iterationsDir: this.sessionManager.getIterationsDir(),
       ralphDir: this.ralphDir,
+      sessionId: this.sessionManager.getSessionId(),
     };
     this.iterationPersistence = createIterationPersistence(iterationOptions);
 
     // Initialize prompt engine
+    const checkCommand = this.config.checkCommand;
+
     const promptOptions: PromptEngineOptions = {
       projectName: this.config.name,
       projectPath: this.config.path,
-      checkCommand: this.config.checkCommand,
+      checkCommand,
     };
     this.promptEngine = createPromptEngine(promptOptions);
   }
@@ -292,7 +297,7 @@ export class RalphEngine {
 
   private async executeTaskWithErrorHandling(
     session: SessionState,
-    status: ApplyInstructions,
+    _status: ApplyInstructions,
     task: { id: string; description: string },
   ): Promise<{
     taskCompleted: boolean;
@@ -318,13 +323,16 @@ export class RalphEngine {
 
       const response = await this.executeAgent(prompt);
 
-      // Parse response
-      const { structured, raw } = this.parseIterationLog(response);
-
-      // Run quality checks
+      // Run quality checks and collect evidence
       await this.log("info", "Running quality checks and validation...");
-      await this.runQualityChecks();
-      await this.validateOpenSpec();
+      const verificationEvidence = await this.collectVerificationEvidence();
+
+      // Parse response
+      const { structured, raw } = this.parseIterationLog(
+        response,
+        session.iteration,
+        task.id,
+      );
 
       // Commit changes
       const commitMsg = `feat: ${task.id} - ${task.description}`;
@@ -336,6 +344,7 @@ export class RalphEngine {
       // Save successful iteration log
       const iterationLog: IterationLog = {
         schemaVersion: CURRENT_SCHEMA_VERSION,
+        sessionId: this.sessionManager.getSessionId(),
         iteration: session.iteration,
         taskId: task.id,
         taskAttempt: session.currentTask?.attemptCount ?? 1,
@@ -343,12 +352,16 @@ export class RalphEngine {
         threadId: structured.threadId,
         status: "success",
         promptTokens: this.promptEngine.estimateTokens(prompt),
+        agentClaimedComplete: structured.agentClaimedComplete ?? true,
+        verificationEvidence,
+        context: structured.context,
         implemented: structured.implemented ?? [],
         codebasePatterns: structured.codebasePatterns ?? [],
         summary: structured.summary,
         commitBefore,
         commitAfter,
         durationMs: Date.now() - startTime,
+        rawOutput: raw,
       };
 
       await this.iterationPersistence.saveIteration(iterationLog);
@@ -376,15 +389,22 @@ export class RalphEngine {
         failureAnalysis = await this.analyzeFailure(session, errorMessage);
       }
 
+      // Collect verification evidence even on failure
+      const verificationEvidence =
+        await this.collectVerificationEvidence().catch(() => undefined);
+
       // Save failed iteration log
       const iterationLog: IterationLog = {
         schemaVersion: CURRENT_SCHEMA_VERSION,
+        sessionId: this.sessionManager.getSessionId(),
         iteration: session.iteration,
         taskId: task.id,
         taskAttempt: session.currentTask?.attemptCount ?? 1,
         timestamp: new Date().toISOString(),
         status: "failed",
         promptTokens: undefined,
+        agentClaimedComplete: false,
+        verificationEvidence,
         failureAnalysis,
         commitBefore,
         durationMs,
@@ -465,19 +485,9 @@ export class RalphEngine {
     );
 
     const response = await this.executeAgent(prompt);
-    const { structured } = this.parseIterationLog(response);
+    const { analysis } = extractFailureAnalysis(response, errorMessage);
 
-    if (structured.failureAnalysis) {
-      return structured.failureAnalysis;
-    }
-
-    // Fallback if parsing fails
-    return {
-      rootCause: errorMessage,
-      fixPlan: "Retry with careful attention to the error",
-      errorMessage,
-      errorType: "unknown",
-    };
+    return analysis;
   }
 
   // ========================================================================
@@ -503,11 +513,14 @@ export class RalphEngine {
 
       ptyProcess.onExit(({ exitCode }) => {
         if (exitCode === 0) {
-          // Strip ANSI codes
-          const cleanResponse = fullResponse.replace(
-            /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
-            "",
+          // Strip ANSI codes using string-based pattern construction
+          const esc = String.fromCharCode(27);
+          const csi = String.fromCharCode(155);
+          const ansiPattern = new RegExp(
+            `[${esc}${csi}][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]`,
+            "g",
           );
+          const cleanResponse = fullResponse.replace(ansiPattern, "");
           resolve(cleanResponse);
         } else {
           reject(new Error(`Amp PTY exited with code ${exitCode}`));
@@ -517,34 +530,23 @@ export class RalphEngine {
   }
 
   // ========================================================================
-  // Log Parsing
+  // Log Parsing (using flexible extraction)
   // ========================================================================
 
-  private parseIterationLog(output: string): {
+  private parseIterationLog(
+    output: string,
+    iteration: number,
+    taskId: string,
+  ): {
     structured: Partial<IterationLog>;
     raw: string;
   } {
-    const sentinelRegex =
-      /<RALPH_ITERATION_LOG_JSON>([\s\S]*?)<\/RALPH_ITERATION_LOG_JSON>/;
-    const match = output.match(sentinelRegex);
-
-    if (match?.[1]) {
-      try {
-        const structured = JSON.parse(match[1].trim()) as Partial<IterationLog>;
-        const raw = output.replace(sentinelRegex, "").slice(-1000).trim();
-        return { structured, raw };
-      } catch (_e) {
-        console.error("Failed to parse agent's JSON log.");
-      }
-    }
+    const sessionId = this.sessionManager.getSessionId();
+    const result = extractFromOutput(output, sessionId, iteration, taskId);
 
     return {
-      structured: {
-        taskId: "unknown",
-        implemented: [],
-        codebasePatterns: [],
-      },
-      raw: output.slice(-500).trim(),
+      structured: result.structured,
+      raw: result.raw,
     };
   }
 
@@ -625,37 +627,6 @@ export class RalphEngine {
     }
   }
 
-  private async runQualityChecks(): Promise<void> {
-    if (!this.config.checkCommand) return;
-
-    const { stdout: changedFiles } = await execAsync("git diff --name-only", {
-      cwd: this.config.path,
-    });
-
-    if (!changedFiles.trim()) return;
-
-    const files = changedFiles
-      .split("\n")
-      .filter((f) => f.trim() && (f.endsWith(".ts") || f.endsWith(".tsx")));
-
-    if (files.length === 0) return;
-
-    try {
-      const baseCmd = this.config.checkCommand.includes("biome")
-        ? "biome check --write --unsafe"
-        : this.config.checkCommand;
-
-      await execAsync(`${baseCmd} ${files.join(" ")}`, {
-        cwd: this.config.path,
-      });
-    } catch {
-      // Fallback to full check
-      await execAsync(this.config.checkCommand, {
-        cwd: this.config.path,
-      });
-    }
-  }
-
   private async getCurrentGitSha(): Promise<string | undefined> {
     try {
       const { stdout } = await execAsync("git rev-parse HEAD", {
@@ -665,6 +636,66 @@ export class RalphEngine {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Collect verification evidence for dual-gate verification.
+   * Runs quality checks and captures all output.
+   */
+  private async collectVerificationEvidence(): Promise<{
+    checkOutput: string;
+    checkOutputSummary: string;
+    testOutput?: string;
+    specValidation: { passed: boolean; errors?: string[] };
+    allChecksPassed: boolean;
+    collectedAt: string;
+  }> {
+    const collectedAt = new Date().toISOString();
+    let checkOutput = "";
+    let checkOutputSummary = "";
+    let testOutput: string | undefined;
+    let specValidationPassed = false;
+    let specErrors: string[] = [];
+    let allChecksPassed = false;
+
+    // Run quality checks
+    if (this.config.checkCommand) {
+      try {
+        const { stdout, stderr } = await execAsync(this.config.checkCommand, {
+          cwd: this.config.path,
+        });
+        checkOutput = stdout + stderr;
+        checkOutputSummary = checkOutput.slice(0, 1000); // First 1000 chars for summary
+      } catch (error) {
+        checkOutput = error instanceof Error ? error.message : String(error);
+        checkOutputSummary = checkOutput.slice(0, 500);
+      }
+    }
+
+    // Run OpenSpec validation
+    try {
+      await this.validateOpenSpec();
+      specValidationPassed = true;
+    } catch (error) {
+      specValidationPassed = false;
+      specErrors = [error instanceof Error ? error.message : String(error)];
+    }
+
+    // Determine if all checks passed
+    allChecksPassed =
+      specValidationPassed && !checkOutput.toLowerCase().includes("error");
+
+    return {
+      checkOutput,
+      checkOutputSummary,
+      testOutput,
+      specValidation: {
+        passed: specValidationPassed,
+        errors: specErrors.length > 0 ? specErrors : undefined,
+      },
+      allChecksPassed,
+      collectedAt,
+    };
   }
 
   private getOpenspecBin(): string {

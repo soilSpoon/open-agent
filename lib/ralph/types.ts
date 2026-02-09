@@ -6,183 +6,170 @@
  * - Immutable iteration logs
  * - Failure analysis propagation
  * - Crash recovery support
+ * - Dual-gate verification
+ * - JSONL format for AI-native parsing
  */
 
 // ============================================================================
 // Schema Versioning
 // ============================================================================
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
+
+import { z } from "zod";
 
 // ============================================================================
-// Core Enums
+// Core Enums and Schemas
 // ============================================================================
 
-export type SessionStatus = "running" | "paused" | "failed" | "completed";
+export const SessionStatusSchema = z.enum([
+  "running",
+  "paused",
+  "failed",
+  "completed",
+]);
+export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 
-export type IterationStatus = "success" | "failed";
+export const IterationStatusSchema = z.enum([
+  "success",
+  "failed",
+  "in_progress",
+]);
+export type IterationStatus = z.infer<typeof IterationStatusSchema>;
 
-export type ErrorType = "validation" | "runtime" | "timeout" | "unknown";
+export const ErrorTypeSchema = z.enum([
+  "validation",
+  "runtime",
+  "timeout",
+  "unknown",
+]);
+export type ErrorType = z.infer<typeof ErrorTypeSchema>;
 
-export type ErrorStrategy = "retry" | "analyze-retry" | "skip" | "escalate";
-
-// ============================================================================
-// Session State (session.json)
-// ============================================================================
-
-export interface SessionState {
-  /** Schema version for migration support */
-  schemaVersion: number;
-
-  /** Unique session identifier */
-  sessionId: string;
-
-  /** OpenSpec change ID */
-  changeId: string;
-
-  /** Current session status */
-  status: SessionStatus;
-
-  /** Current task being worked on */
-  currentTask: {
-    id: string;
-    description: string;
-    attemptCount: number;
-  } | null;
-
-  /** Current iteration number (1-based) */
-  iteration: number;
-
-  /** Maximum iterations allowed */
-  maxIterations: number;
-
-  /** Git commit SHA before last successful iteration */
-  lastSuccessfulCommit?: string;
-
-  /** Concurrency lock information */
-  lockedBy?: {
-    pid: number;
-    timestamp: string;
-  };
-
-  /** Error handling configuration */
-  errorHandling: {
-    strategy: ErrorStrategy;
-    maxRetries: number;
-    currentRetryCount: number;
-  };
-
-  /** Accumulated context across iterations */
-  context: {
-    /** Reusable patterns discovered during development */
-    codebasePatterns: string[];
-
-    /** Rolling window of recent failures (max 3) for context propagation */
-    recentFailures: Array<{
-      iteration: number;
-      taskId: string;
-      rootCause: string;
-      fixPlan: string;
-    }>;
-  };
-}
+export const ErrorStrategySchema = z.enum([
+  "retry",
+  "analyze-retry",
+  "skip",
+  "escalate",
+]);
+export type ErrorStrategy = z.infer<typeof ErrorStrategySchema>;
 
 // ============================================================================
-// Iteration Log (iterations/{N}.json)
+// Verification Evidence
 // ============================================================================
 
-export interface IterationLog {
-  /** Schema version for migration support */
-  schemaVersion: number;
-
-  /** Global iteration number (monotonically increasing) */
-  iteration: number;
-
-  /** Task ID being worked on */
-  taskId: string;
-
-  /** Attempt number for this specific task (1-based) */
-  taskAttempt: number;
-
-  /** ISO 8601 timestamp */
-  timestamp: string;
-
-  /** Amp thread ID if available */
-  threadId?: string;
-
-  /** Success or failure */
-  status: IterationStatus;
-
-  /** Optional: prompt token count for monitoring */
-  promptTokens?: number;
-
-  // --- Success Fields ---
-
-  /** List of implemented changes */
-  implemented?: string[];
-
-  /** Patterns discovered in this iteration */
-  codebasePatterns?: string[];
-
-  /** Human-readable summary */
-  summary?: string;
-
-  // --- Failure Fields ---
-
-  /** Detailed failure analysis (KEY for context propagation) */
-  failureAnalysis?: {
-    /** Technical root cause */
-    rootCause: string;
-
-    /** Specific fix strategy for next attempt */
-    fixPlan: string;
-
-    /** Original error message */
-    errorMessage: string;
-
-    /** Categorized error type */
-    errorType: ErrorType;
-  };
-
-  // --- Git Tracking ---
-
-  /** Git SHA before iteration started */
-  commitBefore?: string;
-
-  /** Git SHA after iteration completed (if committed) */
-  commitAfter?: string;
-
-  // --- Timing ---
-
-  /** Duration in milliseconds */
-  durationMs: number;
-}
+export const VerificationEvidenceSchema = z.object({
+  checkOutput: z.string(),
+  checkOutputSummary: z.string().optional(),
+  testOutput: z.string().optional(),
+  specValidation: z
+    .object({
+      passed: z.boolean(),
+      errors: z.array(z.string()).optional(),
+    })
+    .optional(),
+  allChecksPassed: z.boolean(),
+  collectedAt: z.string(),
+});
+export type VerificationEvidence = z.infer<typeof VerificationEvidenceSchema>;
 
 // ============================================================================
-// Failure Analysis (extracted from agent response)
+// Session State
 // ============================================================================
 
-export interface FailureAnalysis {
-  rootCause: string;
-  fixPlan: string;
-  errorMessage: string;
-  errorType: ErrorType;
-}
+export const SessionStateSchema = z.object({
+  schemaVersion: z.number(),
+  sessionId: z.string(),
+  changeId: z.string(),
+  status: SessionStatusSchema,
+  currentTask: z
+    .object({
+      id: z.string(),
+      description: z.string(),
+      attemptCount: z.number(),
+    })
+    .nullable(),
+  iteration: z.number(),
+  maxIterations: z.number(),
+  lastSuccessfulCommit: z.string().optional(),
+  lockedBy: z
+    .object({
+      pid: z.number(),
+      timestamp: z.string(),
+    })
+    .optional(),
+  errorHandling: z.object({
+    strategy: ErrorStrategySchema,
+    maxRetries: z.number(),
+    currentRetryCount: z.number(),
+  }),
+  context: z.object({
+    codebasePatterns: z.array(z.string()),
+    recentFailures: z.array(
+      z.object({
+        iteration: z.number(),
+        taskId: z.string(),
+        rootCause: z.string(),
+        fixPlan: z.string(),
+      }),
+    ),
+  }),
+  lastCleanupAt: z.string().optional(),
+});
+export type SessionState = z.infer<typeof SessionStateSchema>;
 
 // ============================================================================
-// Lock File (.ralph/.lock)
+// Iteration Log
 // ============================================================================
 
-export interface LockFile {
-  /** Process ID holding the lock */
-  pid: number;
+export const FailureAnalysisSchema = z.object({
+  rootCause: z.string(),
+  fixPlan: z.string(),
+  errorMessage: z.string(),
+  errorType: ErrorTypeSchema,
+});
+export type FailureAnalysis = z.infer<typeof FailureAnalysisSchema>;
 
-  /** ISO 8601 timestamp when lock was acquired */
-  timestamp: string;
+export const IterationLogSchema = z.object({
+  schemaVersion: z.number(),
+  sessionId: z.string(),
+  iteration: z.number(),
+  taskId: z.string(),
+  taskAttempt: z.number(),
+  timestamp: z.string(),
+  threadId: z.string().optional(),
+  status: IterationStatusSchema,
+  promptTokens: z.number().optional(),
+  agentClaimedComplete: z.boolean(),
+  verificationEvidence: VerificationEvidenceSchema.optional(),
+  context: z
+    .object({
+      whatWasDone: z.array(z.string()).optional(),
+      learnings: z.array(z.string()).optional(),
+      filesChanged: z.array(z.string()).optional(),
+      gotchas: z.array(z.string()).optional(),
+    })
+    .optional(),
+  implemented: z.array(z.string()).optional(),
+  codebasePatterns: z.array(z.string()).optional(),
+  summary: z.string().optional(),
+  failureAnalysis: FailureAnalysisSchema.optional(),
+  commitBefore: z.string().optional(),
+  commitAfter: z.string().optional(),
+  durationMs: z.number(),
+  rawOutput: z.string().optional(),
+});
+export type IterationLog = z.infer<typeof IterationLogSchema>;
 
-  /** Session ID for correlation */
-  sessionId: string;
-}
+// ============================================================================
+// Lock File
+// ============================================================================
+
+export const LockFileSchema = z.object({
+  pid: z.number(),
+  timestamp: z.string(),
+  sessionId: z.string(),
+});
+export type LockFile = z.infer<typeof LockFileSchema>;
 
 // ============================================================================
 // Agent Plugin Interface
@@ -190,18 +177,12 @@ export interface LockFile {
 
 export interface AgentPlugin {
   readonly name: string;
-
-  /** Check if agent is installed and available */
   isAvailable(): Promise<boolean>;
-
-  /** Execute task with given prompt */
   execute(options: {
     prompt: string;
     cwd: string;
     timeoutMs?: number;
   }): Promise<AgentResult>;
-
-  /** Parse agent output to extract structured log */
   parseOutput(output: string): {
     structured: Partial<IterationLog>;
     raw: string;
@@ -226,9 +207,6 @@ export type LockStatus =
   | { status: "stale"; lock: LockFile };
 
 export interface ResumeOptions {
-  /** Resume from existing session */
   resume: boolean;
-
-  /** Force start fresh even if session exists */
   force: boolean;
 }

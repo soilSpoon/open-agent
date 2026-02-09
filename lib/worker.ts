@@ -81,14 +81,14 @@ class RalphWorker {
         onIterationComplete: async (iteration) => {
           await db
             .update(runs)
-            .set({ currentIteration: iteration } as any)
+            .set({ currentIteration: iteration })
             .where(eq(runs.id, run.id));
         },
         onTaskStart: async (taskId, title) => {
           console.log(`[RalphWorker] [${run.id}] Task Start: ${taskId}`);
           await db
             .update(runs)
-            .set({ lastTaskId: taskId } as any)
+            .set({ lastTaskId: taskId })
             .where(eq(runs.id, run.id));
 
           const existingTask = await db.query.tasks.findFirst({
