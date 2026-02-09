@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ralph working directory (execution telemetry, session state)
+.ralph/
+!**/.ralph/progress.md
