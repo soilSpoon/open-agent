@@ -11,11 +11,10 @@
  */
 
 import { exec } from "node:child_process";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { access, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import * as pty from "node-pty";
 import { z } from "zod";
 import type { ProjectConfig } from "../openspec/types.js";
 import { extractFailureAnalysis, extractFromOutput } from "./extraction";
@@ -34,6 +33,7 @@ import {
   type SessionManager,
   type SessionManagerOptions,
 } from "./session";
+import { SandboxSdkRuntime, type SandboxRuntime } from "./sandbox-runtime";
 import type {
   ErrorStrategy,
   FailureAnalysis,
@@ -113,6 +113,7 @@ export class RalphEngine {
   private sessionManager!: SessionManager;
   private iterationPersistence!: IterationPersistence;
   private promptEngine!: PromptTemplateEngine;
+  private runtime!: SandboxRuntime;
 
   // Paths
   private changeBasePath: string;
@@ -126,13 +127,13 @@ export class RalphEngine {
     this.errorStrategy = options.errorStrategy ?? "analyze-retry";
     this.maxRetries = options.maxRetries ?? 3;
 
-    this.changeBasePath = path.join(
+    this.changeBasePath = join(
       this.config.path,
       "openspec",
       "changes",
       this.changeId,
     );
-    this.ralphDir = path.join(this.changeBasePath, ".ralph");
+    this.ralphDir = join(this.changeBasePath, ".ralph");
   }
 
   // ========================================================================
@@ -149,6 +150,17 @@ export class RalphEngine {
       maxRetries: this.maxRetries,
     };
     this.sessionManager = await createSessionManager(sessionOptions);
+
+    // Read existing session to get sandbox ID
+    let session = await this.sessionManager.readSession();
+
+    // Initialize sandbox runtime
+    this.runtime = new SandboxSdkRuntime({
+      projectPath: this.config.path,
+      persistedSessionId: session?.context.sandbox?.sessionId,
+      onLog: (level, message) => this.log(level, message),
+    });
+    await this.runtime.start();
 
     // Initialize iteration persistence
     const iterationOptions: IterationPersistenceOptions = {
@@ -167,6 +179,19 @@ export class RalphEngine {
       checkCommand,
     };
     this.promptEngine = createPromptEngine(promptOptions);
+
+    // Ensure session is initialized and sandbox ID is saved
+    if (!session) {
+      session = this.sessionManager.createInitialState();
+    }
+    
+    if (!session.context.sandbox) {
+      session.context.sandbox = {
+        sessionId: this.runtime.sessionId,
+        createdAt: new Date().toISOString(),
+      };
+      await this.sessionManager.writeSession(session);
+    }
   }
 
   // ========================================================================
@@ -580,38 +605,8 @@ export class RalphEngine {
   // ========================================================================
 
   private async executeAgent(prompt: string): Promise<string> {
-    const ampBin = this.getAmpBin();
-    let fullResponse = "";
-
-    return new Promise<string>((resolve, reject) => {
-      const ptyProcess = pty.spawn(ampBin, ["--execute", prompt], {
-        name: "xterm-color",
-        cols: 120,
-        rows: 40,
-        cwd: this.config.path,
-      });
-
-      ptyProcess.onData((data) => {
-        fullResponse += data;
-        process.stdout.write(data);
-      });
-
-      ptyProcess.onExit(({ exitCode }) => {
-        if (exitCode === 0) {
-          // Strip ANSI codes using string-based pattern construction
-          const esc = String.fromCharCode(27);
-          const csi = String.fromCharCode(155);
-          const ansiPattern = new RegExp(
-            `[${esc}${csi}][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]`,
-            "g",
-          );
-          const cleanResponse = fullResponse.replace(ansiPattern, "");
-          resolve(cleanResponse);
-        } else {
-          reject(new Error(`Amp PTY exited with code ${exitCode}`));
-        }
-      });
-    });
+    const { transcript } = await this.runtime.runAgentExecute(prompt);
+    return transcript;
   }
 
   // ========================================================================
@@ -671,28 +666,28 @@ export class RalphEngine {
 
   private async markTaskComplete(taskId: string): Promise<void> {
     // Update tasks.md directly
-    const tasksPath = path.join(this.changeBasePath, "tasks.md");
+    const tasksPath = join(this.changeBasePath, "tasks.md");
     try {
-      let content = await fs.readFile(tasksPath, "utf-8");
+      let content = await readFile(tasksPath, "utf-8");
       // Mark task as complete
       const taskPattern = new RegExp(`(- \\[ \\]) ${taskId}[:\\s]`, "i");
       content = content.replace(taskPattern, "- [x] $1 ");
-      await fs.writeFile(tasksPath, content, "utf-8");
+      await writeFile(tasksPath, content, "utf-8");
     } catch {
       // tasks.md might not exist, ignore
     }
   }
 
   private async markTaskSkipped(taskId: string, reason: string): Promise<void> {
-    const tasksPath = path.join(this.changeBasePath, "tasks.md");
+    const tasksPath = join(this.changeBasePath, "tasks.md");
     try {
-      let content = await fs.readFile(tasksPath, "utf-8");
+      let content = await readFile(tasksPath, "utf-8");
       const taskPattern = new RegExp(`(- \\[ \\]) ${taskId}[:\\s]`, "i");
       content = content.replace(
         taskPattern,
         `- [ ] ~~${taskId}~~ (skipped: ${reason}) `,
       );
-      await fs.writeFile(tasksPath, content, "utf-8");
+      await writeFile(tasksPath, content, "utf-8");
     } catch {
       // Ignore
     }
@@ -703,9 +698,9 @@ export class RalphEngine {
   // ========================================================================
 
   private async getSpecContext(): Promise<string> {
-    const changeFile = path.join(this.changeBasePath, "change.json");
+    const changeFile = join(this.changeBasePath, "change.json");
     try {
-      const content = await fs.readFile(changeFile, "utf-8");
+      const content = await readFile(changeFile, "utf-8");
       return `### Authoritative Spec (change.json)\n${content}\n`;
     } catch {
       return "### Spec context not found on disk.\n";
@@ -784,16 +779,16 @@ export class RalphEngine {
   }
 
   private getOpenspecBin(): string {
-    return path.join(this.config.path, "node_modules", ".bin", "openspec");
+    return join(this.config.path, "node_modules", ".bin", "openspec");
   }
 
   private getAmpBin(): string {
-    const homeAmp = path.join(os.homedir(), ".amp", "bin", "amp");
+    const homeAmp = join(homedir(), ".amp", "bin", "amp");
     if (require("node:fs").existsSync(homeAmp)) {
       return homeAmp;
     }
 
-    const projectAmp = path.join(
+    const projectAmp = join(
       this.config.path,
       "node_modules",
       ".bin",

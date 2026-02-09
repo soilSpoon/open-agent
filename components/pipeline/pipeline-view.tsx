@@ -1,7 +1,8 @@
 "use client";
-import { Code, FileText, ListTodo, Lock, Palette } from "lucide-react";
+import { Code, FileText, ListTodo, Lock, Palette, Activity } from "lucide-react";
 import type { ArtifactType, OpenSpecCLIStatus } from "@/lib/openspec/types";
 import { cn } from "@/lib/utils";
+import { usePipelineSchema } from "@/features/pipeline/api/hooks/use-pipeline-schema";
 
 interface PipelineViewProps {
   artifacts: Record<ArtifactType, { exists: boolean }>;
@@ -10,21 +11,31 @@ interface PipelineViewProps {
   onStageSelect: (stage: ArtifactType) => void;
 }
 
+const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  proposal: FileText,
+  specs: Code,
+  design: Palette,
+  tasks: ListTodo,
+  apply: Activity,
+};
+
 export function PipelineView({
   artifacts,
   status,
   currentStage,
   onStageSelect,
 }: PipelineViewProps) {
-  const stages: {
-    id: ArtifactType;
-    icon: React.ComponentType<{ className?: string }>;
-    label: string;
-  }[] = [
-    { id: "proposal", icon: FileText, label: "Proposal" },
-    { id: "specs", icon: Code, label: "Specs" },
-    { id: "design", icon: Palette, label: "Design" },
-    { id: "tasks", icon: ListTodo, label: "Tasks" },
+  const { data: schema } = usePipelineSchema();
+
+  const stages = schema?.artifacts.map((a) => ({
+    id: a.id as ArtifactType,
+    icon: iconMap[a.id] || FileText,
+    label: a.id.charAt(0).toUpperCase() + a.id.slice(1),
+  })) || [
+    { id: "proposal" as ArtifactType, icon: FileText, label: "Proposal" },
+    { id: "specs" as ArtifactType, icon: Code, label: "Specs" },
+    { id: "design" as ArtifactType, icon: Palette, label: "Design" },
+    { id: "tasks" as ArtifactType, icon: ListTodo, label: "Tasks" },
   ];
 
   return (

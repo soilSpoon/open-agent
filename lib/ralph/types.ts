@@ -112,6 +112,13 @@ export const SessionStateSchema = z.object({
         fixPlan: z.string(),
       }),
     ),
+    sandbox: z
+      .object({
+        sessionId: z.string().optional(),
+        workspaceId: z.string().optional(),
+        createdAt: z.string().optional(),
+      })
+      .optional(),
   }),
   lastCleanupAt: z.string().optional(),
 });

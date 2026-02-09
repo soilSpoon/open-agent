@@ -4,12 +4,17 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createOpenSpecChange } from "@/app/actions";
 import { queryKeys } from "@/lib/query/keys";
 
+export interface CreateChangeInput {
+  title: string;
+  description?: string;
+}
+
 export function useCreateChange() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (title: string) => {
-      return await createOpenSpecChange(title);
+    mutationFn: async (input: CreateChangeInput) => {
+      return await createOpenSpecChange(input.title, input.description);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({

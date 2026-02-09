@@ -1,7 +1,7 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,19 @@ interface TaskVisualEditorProps {
 
 export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
   const [sections, setSections] = useState<TaskSection[]>([]);
+
+  const stats = useMemo(() => {
+    const total = sections.reduce((acc, s) => acc + s.tasks.length, 0);
+    const completed = sections.reduce(
+      (acc, s) => acc + s.tasks.filter((t) => t.completed).length,
+      0
+    );
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const nextTask = sections
+      .flatMap((s) => s.tasks.map((t) => ({ ...t, section: s.title })))
+      .find((t) => !t.completed);
+    return { total, completed, percentage, nextTask };
+  }, [sections]);
 
   // Parse Markdown to Structured Data
   useEffect(() => {
@@ -150,6 +163,31 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
 
   return (
     <div className="flex flex-col gap-6 p-4 bg-gray-50/50 min-h-full">
+      {stats.total > 0 && (
+        <div className="bg-white border rounded-xl shadow-sm p-4 mb-2">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-medium text-gray-700">
+                Progress: {stats.completed} / {stats.total} tasks
+              </span>
+              <span className="text-xs text-muted-foreground">
+                ({stats.percentage}%)
+              </span>
+            </div>
+            {stats.nextTask && (
+              <div className="text-xs text-muted-foreground">
+                Next: <span className="font-medium">{stats.nextTask.text.slice(0, 40)}{stats.nextTask.text.length > 40 ? '...' : ''}</span>
+              </div>
+            )}
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-green-500 transition-all duration-300"
+              style={{ width: `${stats.percentage}%` }}
+            />
+          </div>
+        </div>
+      )}
       {sections.map((section) => (
         <div
           key={section.id}
@@ -176,6 +214,18 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
           <div className="p-4 space-y-3">
             {section.tasks.map((task) => (
               <div key={task.id} className="flex items-center gap-3 group">
+                <button
+                  type="button"
+                  onClick={() => updateTask(section.id, task.id, { completed: !task.completed })}
+                  className={cn(
+                    "w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+                    task.completed
+                      ? "bg-green-500 border-green-500 text-white"
+                      : "border-gray-300 hover:border-green-400"
+                  )}
+                >
+                  {task.completed && <Check className="w-3 h-3" />}
+                </button>
                 <Input
                   value={task.text}
                   onChange={(e) =>

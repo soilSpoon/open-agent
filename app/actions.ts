@@ -22,6 +22,12 @@ import { createIterationPersistence } from "@/lib/ralph/iteration";
 import type { IterationLog } from "@/lib/ralph/types";
 import { logs, projects, runs, tasks } from "@/lib/schema";
 
+import { loadOpenSpecSchema } from "@/lib/openspec/schema-loader";
+
+export async function getPipelineSchema() {
+  return await loadOpenSpecSchema();
+}
+
 export async function getDashboardStats() {
   const [activeRunsCount, completedTasks] = await Promise.all([
     db.query.runs.findMany({
@@ -45,8 +51,8 @@ export async function getDashboardStats() {
   };
 }
 
-export async function createOpenSpecChange(title: string) {
-  return await createChange(title);
+export async function createOpenSpecChange(title: string, description?: string) {
+  return await createChange(title, description);
 }
 
 export async function generateInstructions(

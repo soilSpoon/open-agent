@@ -4,6 +4,7 @@ import { File, Folder } from "lucide-react";
 import { MarkdownEditor } from "@/components/common/markdown-editor";
 import type { SpecEntry } from "@/lib/openspec/types";
 import { cn } from "@/lib/utils";
+import { CapabilitiesChecklist } from "./capabilities-checklist";
 
 interface SpecsEditorProps {
   files: SpecEntry[];
@@ -13,6 +14,7 @@ interface SpecsEditorProps {
   onChangeContent: (value: string) => void;
   placeholder?: string;
   className?: string;
+  proposalContent?: string;
 }
 
 export function SpecsEditor({
@@ -23,14 +25,22 @@ export function SpecsEditor({
   onChangeContent,
   placeholder,
   className,
+  proposalContent,
 }: SpecsEditorProps) {
   return (
-    <div
-      className={cn(
-        "flex flex-1 h-full min-h-[500px] border rounded-md overflow-hidden",
-        className,
+    <div className="flex flex-col flex-1 h-full min-h-[500px]">
+      {proposalContent && (
+        <CapabilitiesChecklist
+          proposalContent={proposalContent}
+          specFiles={files}
+        />
       )}
-    >
+      <div
+        className={cn(
+          "flex flex-1 border rounded-md overflow-hidden",
+          className,
+        )}
+      >
       {/* Sidebar */}
       <div className="w-64 bg-gray-50/50 border-r flex flex-col overflow-y-auto">
         <div className="p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -86,6 +96,7 @@ export function SpecsEditor({
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }

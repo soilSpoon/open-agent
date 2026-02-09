@@ -75,6 +75,12 @@ export function ChangeDetail({
     enabled: stage === "specs",
   });
 
+  const { data: proposalData } = useArtifact({
+    changeId,
+    type: "proposal",
+    enabled: stage === "specs",
+  });
+
   const { data: artifactData, isLoading: isArtifactLoading } = useArtifact({
     changeId,
     type: stage,
@@ -394,6 +400,7 @@ export function ChangeDetail({
                 setIsModified(true);
               }}
               placeholder={`# Specs\n\nSelect a file to edit...`}
+              proposalContent={proposalData?.content}
             />
           ) : stage === "tasks" && viewMode === "visual" ? (
             <div className="flex-1 flex flex-col">
