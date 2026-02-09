@@ -1,4 +1,10 @@
-import { Activity, CheckCircle, FileText, Play } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  CheckCircle,
+  FileText,
+  Play,
+} from "lucide-react";
 import Link from "next/link";
 import { getActiveRuns, getDashboardStats, getRuns } from "@/app/actions";
 import { ChangeActions } from "@/components/dashboard/change-actions";
@@ -9,6 +15,9 @@ import { RunLink } from "@/components/dashboard/run-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getChanges } from "@/lib/openspec/service";
 import { cn } from "@/lib/utils";
+
+const DASHBOARD_CHANGES_LIMIT = 5;
+const DASHBOARD_RUNS_LIMIT = 5;
 
 export default async function Dashboard() {
   const [changes, activeRuns, allRuns, stats] = await Promise.all([
@@ -81,17 +90,26 @@ export default async function Dashboard() {
 
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-7">
           <Card className="col-span-full lg:col-span-4">
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Recent Changes</CardTitle>
+              {changes.length > DASHBOARD_CHANGES_LIMIT && (
+                <Link
+                  href="/changes"
+                  className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+                >
+                  View All
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              )}
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {changes.length === 0 ? (
-                  <div className="text-center text-gray-500 py-8">
+                  <div className="text-center text-muted-foreground py-8">
                     No changes yet. Create one to get started.
                   </div>
                 ) : (
-                  changes.map((change) => {
+                  changes.slice(0, DASHBOARD_CHANGES_LIMIT).map((change) => {
                     const runForChange = activeRuns.find(
                       (r) => r.change_id === change.id,
                     );
@@ -100,17 +118,17 @@ export default async function Dashboard() {
                       <Link
                         key={change.id}
                         href={`/changes/${change.id}`}
-                        className="group flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors relative gap-4"
+                        className="group flex flex-col sm:flex-row sm:items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors relative gap-3"
                       >
-                        <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                            <FileText className="h-5 w-5" />
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                            <FileText className="h-4 w-4" />
                           </div>
-                          <div>
-                            <p className="font-medium text-lg leading-tight">
+                          <div className="min-w-0">
+                            <p className="font-medium leading-tight truncate">
                               {change.title}
                             </p>
-                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
                               <span>
                                 Updated{" "}
                                 {new Date(
@@ -126,8 +144,8 @@ export default async function Dashboard() {
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center justify-between sm:justify-end gap-4">
-                          <div className="text-right text-sm text-gray-500">
+                        <div className="flex items-center justify-between sm:justify-end gap-3">
+                          <div className="text-right text-xs text-muted-foreground">
                             {
                               Object.values(change.artifacts).filter(
                                 (a) => a.exists,
@@ -136,11 +154,12 @@ export default async function Dashboard() {
                             Artifacts
                           </div>
                           <div
-                            className={`px-2 py-1 rounded-full text-xs ${
+                            className={cn(
+                              "px-2 py-0.5 rounded-full text-xs",
                               change.status === "active"
                                 ? "bg-green-100 text-green-700"
-                                : "bg-gray-100 text-gray-700"
-                            }`}
+                                : "bg-gray-100 text-gray-700",
+                            )}
                           >
                             {change.status}
                           </div>
@@ -160,20 +179,29 @@ export default async function Dashboard() {
           </Card>
 
           <Card className="col-span-full lg:col-span-3">
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Ralph Runs</CardTitle>
+              {allRuns.length > DASHBOARD_RUNS_LIMIT && (
+                <Link
+                  href="/runs"
+                  className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+                >
+                  View All
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              )}
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {allRuns.length === 0 ? (
-                  <div className="text-center text-gray-500 py-4">
+                  <div className="text-center text-muted-foreground py-4">
                     No runs yet.
                   </div>
                 ) : (
-                  allRuns.map((run) => (
+                  allRuns.slice(0, DASHBOARD_RUNS_LIMIT).map((run) => (
                     <div
                       key={run.id}
-                      className="flex items-center justify-between border-b pb-4 last:border-0 last:pb-0"
+                      className="flex items-center justify-between border-b pb-3 last:border-0 last:pb-0"
                     >
                       <div>
                         <div className="flex items-center gap-2">
@@ -186,20 +214,20 @@ export default async function Dashboard() {
                           {run.change_id && (
                             <Link
                               href={`/changes/${run.change_id}`}
-                              className="text-xs text-gray-500 hover:text-gray-900 hover:underline"
+                              className="text-xs text-muted-foreground hover:text-foreground hover:underline"
                             >
                               ({run.change_id})
                             </Link>
                           )}
                         </div>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-muted-foreground">
                           Task {run.progress}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
                         <span
                           className={cn(
-                            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 border-transparent",
+                            "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 border-transparent",
                             run.status === "running"
                               ? "bg-blue-100 text-blue-800"
                               : run.status === "completed"

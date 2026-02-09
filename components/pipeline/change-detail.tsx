@@ -1,4 +1,5 @@
 "use client";
+
 import {
   AlertCircle,
   FileCode,
@@ -9,34 +10,30 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  fetchSpecsList,
-  fixArtifact,
-  generateInstructions,
-  getActiveRunForChange,
-  getOpenSpecChangeStatus,
-  getProject,
-  loadArtifact,
-  startRalphRun,
-  updateArtifact,
-  validateOpenSpecChange,
-} from "@/app/actions";
+import { useEffect, useRef, useState } from "react";
 import { MarkdownEditor } from "@/components/common/markdown-editor";
 import { TaskVisualEditor } from "@/components/pipeline/task-visual-editor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  useArtifact,
+  useUpdateArtifact,
+} from "@/features/pipeline/api/hooks/use-artifact";
+import { useChangeStatus } from "@/features/pipeline/api/hooks/use-change-status";
+import { useFixArtifact } from "@/features/pipeline/api/hooks/use-fix-artifact";
+import { useGenerateArtifact } from "@/features/pipeline/api/hooks/use-generate-artifact";
+import { useSpecs } from "@/features/pipeline/api/hooks/use-specs";
+import {
+  usePipelineStore,
+  useSelectedSpecFile,
+  useStage,
+  useViewMode,
+} from "@/features/pipeline/stores/pipeline-store";
 import { useProjects } from "@/features/projects/api/hooks/use-projects";
 import { useSelectedProjectId } from "@/features/projects/stores/project-store";
-import type {
-  ArtifactType,
-  OpenSpecChange,
-  OpenSpecCLIStatus,
-  ProjectConfig,
-  SpecEntry,
-} from "@/lib/openspec/types";
-import type { Validation } from "@/lib/openspec/validation";
+import { useStartRalphRun } from "@/features/runs/api/hooks/use-start-ralph-run";
+import type { OpenSpecChange } from "@/lib/openspec/types";
 import { useSettings } from "@/lib/settings-context";
 import { cn } from "@/lib/utils";
 import { PipelineView } from "./pipeline-view";
@@ -51,171 +48,63 @@ export function ChangeDetail({
   change: OpenSpecChange;
   changeId: string;
 }) {
-  const [stage, setStage] = useState<ArtifactType>("proposal");
+  const stage = useStage();
+  const viewMode = useViewMode();
+  const selectedSpecFile = useSelectedSpecFile();
+  const { setStage, setViewMode, setSelectedSpecFile } = usePipelineStore();
+
   const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [validation, setValidation] = useState<Validation | null>(null);
-  const [isValidating, setIsValidating] = useState(false);
-  const [fixing, setFixing] = useState(false);
-  const [cliStatus, setCliStatus] = useState<OpenSpecCLIStatus | null>(null);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-
-  const [specFiles, setSpecFiles] = useState<SpecEntry[]>([]);
-  const [selectedSpecFile, setSelectedSpecFile] = useState<string | null>(null);
-
-  const [viewMode, setViewMode] = useState<"visual" | "markdown">("visual");
+  const [isModified, setIsModified] = useState(false);
+  const contentRef = useRef(content);
 
   const { language } = useSettings();
   const router = useRouter();
 
-  const [isModified, setIsModified] = useState(false);
-  const contentRef = useRef(content);
+  const selectedProjectId = useSelectedProjectId();
+  const { data: projects = [] } = useProjects();
 
-  const refreshStatus = useCallback(async () => {
-    setIsValidating(true);
-    try {
-      const [result, newStatus, activeRun] = await Promise.all([
-        validateOpenSpecChange(change.id),
-        getOpenSpecChangeStatus(change.id),
-        getActiveRunForChange(change.id),
-      ]);
-      setValidation(result);
-      setCliStatus(newStatus);
-      setActiveRunId(activeRun?.id || null);
-    } finally {
-      setIsValidating(false);
-    }
-  }, [change.id]);
+  const {
+    validation,
+    status: cliStatus,
+    activeRun,
+    isLoading: isStatusLoading,
+  } = useChangeStatus(changeId);
+
+  const { data: specFiles = [] } = useSpecs({
+    changeId,
+    enabled: stage === "specs",
+  });
+
+  const { data: artifactData, isLoading: isArtifactLoading } = useArtifact({
+    changeId,
+    type: stage,
+    filePath: selectedSpecFile ?? undefined,
+  });
+
+  const updateArtifactMutation = useUpdateArtifact();
+  const generateMutation = useGenerateArtifact();
+  const fixMutation = useFixArtifact();
+  const startRunMutation = useStartRalphRun();
 
   useEffect(() => {
     contentRef.current = content;
   }, [content]);
 
   useEffect(() => {
-    if (stage === "specs") {
-      fetchSpecsList(change.id).then((files) => {
-        setSpecFiles(files);
-        if (files.length > 0 && !selectedSpecFile) {
-          setSelectedSpecFile(files[0].path);
-        }
-      });
-    }
-  }, [change.id, stage, selectedSpecFile]); // selectedSpecFile is needed here to auto-select if nothing is selected
-
-  useEffect(() => {
-    setLoading(true);
-    // Load content
-    loadArtifact(change.id, stage, selectedSpecFile || undefined).then(
-      (data) => {
-        const newContent = data?.content || "";
-        setContent(newContent);
-        contentRef.current = newContent;
-        setIsModified(false);
-        setLoading(false);
-      },
-    );
-  }, [change.id, stage, selectedSpecFile]);
-
-  // Run validation and status check on mount and after saves
-  useEffect(() => {
-    refreshStatus();
-  }, [refreshStatus]);
-
-  // Debounced auto-save and validation
-  useEffect(() => {
-    if (!isModified || loading || saving || generating || fixing) return;
-
-    const timeoutId = setTimeout(async () => {
-      const contentToSave = content;
-      // Perform background save and validation
-      await updateArtifact(
-        change.id,
-        stage,
-        contentToSave,
-        selectedSpecFile || undefined,
-      );
-      await refreshStatus();
-
-      // Only reset modified flag if content hasn't changed since we started saving
-      if (contentRef.current === contentToSave) {
-        setIsModified(false);
-      }
-    }, 2000);
-
-    return () => clearTimeout(timeoutId);
-  }, [
-    content,
-    isModified,
-    loading,
-    saving,
-    generating,
-    fixing,
-    change.id,
-    stage,
-    refreshStatus,
-    selectedSpecFile,
-  ]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await updateArtifact(
-        change.id,
-        stage,
-        content,
-        selectedSpecFile || undefined,
-      );
-      await refreshStatus();
+    if (artifactData?.content !== undefined) {
+      const newContent = artifactData.content || "";
+      setContent(newContent);
+      contentRef.current = newContent;
       setIsModified(false);
-      router.refresh();
-    } catch (error) {
-      console.error("Failed to save:", error);
-    } finally {
-      setSaving(false);
     }
-  };
+  }, [artifactData]);
 
-  const handleGenerate = async () => {
-    setGenerating(true);
-    try {
-      const generatedContent = await generateInstructions(
-        change.id,
-        stage,
-        language,
-      );
-      setContent(generatedContent);
-
-      // Auto-save and validate after generation to provide immediate feedback
-      setSaving(true);
-      await updateArtifact(change.id, stage, generatedContent);
-
-      // If we're in specs, refresh the file list to show the new file immediately
-      if (stage === "specs") {
-        const files = await fetchSpecsList(change.id);
-        setSpecFiles(files);
-        if (files.length > 0 && !selectedSpecFile) {
-          setSelectedSpecFile(files[0].path);
-        }
-      }
-
-      await refreshStatus();
-      setIsModified(false);
-      setSaving(false);
-      router.refresh();
-    } catch (error) {
-      console.error("Failed to generate:", error);
-    } finally {
-      setGenerating(false);
+  useEffect(() => {
+    if (stage === "specs" && specFiles.length > 0 && !selectedSpecFile) {
+      setSelectedSpecFile(specFiles[0].path);
     }
-  };
+  }, [stage, specFiles, selectedSpecFile, setSelectedSpecFile]);
 
-  const selectedProjectId = useSelectedProjectId();
-  const { data: projects = [] } = useProjects();
-
-  // Auto-select first project if none selected and projects available
   useEffect(() => {
     if (!selectedProjectId && projects.length > 0) {
       const {
@@ -225,93 +114,122 @@ export function ChangeDetail({
     }
   }, [selectedProjectId, projects]);
 
-  const handleRunRalph = async () => {
-    setRunning(true);
-    try {
-      if (activeRunId) {
-        router.push(`/runs/${activeRunId}`);
-        return;
+  useEffect(() => {
+    if (
+      !isModified ||
+      isArtifactLoading ||
+      updateArtifactMutation.isPending ||
+      generateMutation.isPending ||
+      fixMutation.isPending
+    )
+      return;
+
+    const timeoutId = setTimeout(async () => {
+      const contentToSave = content;
+      await updateArtifactMutation.mutateAsync({
+        changeId,
+        type: stage,
+        filePath: selectedSpecFile ?? undefined,
+        content: contentToSave,
+      });
+
+      if (contentRef.current === contentToSave) {
+        setIsModified(false);
       }
+    }, 2000);
 
-      // Get current project config from zustand store
-      let projectConfig: ProjectConfig | undefined;
+    return () => clearTimeout(timeoutId);
+  }, [
+    content,
+    isModified,
+    isArtifactLoading,
+    updateArtifactMutation,
+    generateMutation.isPending,
+    fixMutation.isPending,
+    changeId,
+    stage,
+    selectedSpecFile,
+  ]);
 
-      if (selectedProjectId) {
-        const dbProject = await getProject(selectedProjectId);
-        if (dbProject) {
-          projectConfig = {
-            id: dbProject.id,
-            name: dbProject.name,
-            path: dbProject.path,
-            checkCommand: dbProject.checkCommand ?? undefined,
-            preCheckCommand: dbProject.preCheckCommand ?? undefined,
-          };
-        }
-      }
+  const handleSave = async () => {
+    await updateArtifactMutation.mutateAsync({
+      changeId,
+      type: stage,
+      filePath: selectedSpecFile ?? undefined,
+      content,
+    });
+    setIsModified(false);
+  };
 
-      if (!projectConfig) {
-        alert("Please select a project first in the dashboard.");
-        setRunning(false);
-        return;
-      }
-
-      const runId = await startRalphRun(change.id, projectConfig);
-      router.push(`/runs/${runId}`);
-    } catch (error) {
-      console.error("Failed to start Ralph run:", error);
-      setRunning(false);
-    }
+  const handleGenerate = async () => {
+    const generatedContent = await generateMutation.mutateAsync({
+      changeId,
+      type: stage,
+      language,
+    });
+    setContent(generatedContent);
+    setIsModified(false);
   };
 
   const handleFix = async () => {
     if (!validation || validation.valid) return;
-    setFixing(true);
-    try {
-      const result = await fixArtifact(changeId, validation.errors, language);
-      if (result?.success) {
-        // Reload global status
-        await refreshStatus();
+    const result = await fixMutation.mutateAsync({
+      changeId,
+      errors: validation.errors,
+      language,
+    });
 
-        // If the current stage was one of the modified files, we need to reload its content
-        const isCurrentStageModified = result.modifiedFiles.some(
-          (f) =>
-            f.type === stage &&
-            (!selectedSpecFile || f.filePath === selectedSpecFile),
-        );
+    if (result?.success) {
+      const isCurrentStageModified = result.modifiedFiles.some(
+        (f) =>
+          f.type === stage &&
+          (!selectedSpecFile || f.filePath === selectedSpecFile),
+      );
 
-        if (isCurrentStageModified) {
-          const data = await loadArtifact(
-            changeId,
-            stage,
-            selectedSpecFile || undefined,
-          );
-          setContent(data?.content || "");
-          setIsModified(false);
-        }
-
-        // Return result so ValidationStatus can show the report
-        return result;
+      if (isCurrentStageModified && artifactData) {
+        setContent(artifactData.content || "");
+        setIsModified(false);
       }
-    } catch (error) {
-      console.error("Failed to fix artifact:", error);
-    } finally {
-      setFixing(false);
-      router.refresh();
+
+      return result;
     }
   };
 
-  // Determine current artifact status from CLI status
+  const handleRunRalph = async () => {
+    if (activeRun?.id) {
+      router.push(`/runs/${activeRun.id}`);
+      return;
+    }
+
+    if (!selectedProjectId) {
+      alert("Please select a project first in the dashboard.");
+      return;
+    }
+
+    const runId = await startRunMutation.mutateAsync({
+      changeId,
+      projectId: selectedProjectId,
+    });
+    router.push(`/runs/${runId}`);
+  };
+
   const currentArtifactInfo = cliStatus?.artifacts.find(
     (a) => a.id === stage || (stage === "specs" && a.id.startsWith("specs")),
   );
   const isBlocked = currentArtifactInfo?.status === "blocked";
   const isReady = currentArtifactInfo?.status === "ready";
 
+  const loading = isArtifactLoading;
+  const saving = updateArtifactMutation.isPending;
+  const generating = generateMutation.isPending;
+  const fixing = fixMutation.isPending;
+  const running = startRunMutation.isPending;
+
   return (
     <div className="flex flex-col gap-6">
       <ValidationStatus
         validation={validation}
-        isLoading={isValidating && !validation}
+        isLoading={isStatusLoading && !validation}
         fixing={fixing}
         onFix={handleFix}
         stage={stage}
@@ -325,7 +243,7 @@ export function ChangeDetail({
 
       <PlannerStatus
         status={cliStatus}
-        isLoading={isValidating && !cliStatus}
+        isLoading={isStatusLoading && !cliStatus}
       />
 
       <PipelineView
@@ -442,7 +360,7 @@ export function ChangeDetail({
                     size="sm"
                     className={cn(
                       "flex-1 sm:flex-none text-xs md:text-sm h-8 md:h-9",
-                      activeRunId
+                      activeRun?.id
                         ? "bg-green-600 hover:bg-green-700"
                         : "bg-blue-600 hover:bg-blue-700",
                     )}
@@ -454,7 +372,7 @@ export function ChangeDetail({
                     ) : (
                       <Play className="mr-1.5 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4" />
                     )}
-                    {activeRunId ? "View" : "Run"}
+                    {activeRun?.id ? "View" : "Run"}
                   </Button>
                 )}
               </div>

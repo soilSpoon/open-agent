@@ -44,7 +44,9 @@ export default function RootLayout({
                   <MobileHeader />
                   <Header />
                   <main className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6 bg-background">
-                    <Providers>{children}</Providers>
+                    <div className="mx-auto w-full max-w-7xl">
+                      <Providers>{children}</Providers>
+                    </div>
                   </main>
                 </div>
               </div>

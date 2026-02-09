@@ -1,9 +1,7 @@
 "use client";
 
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { deleteOpenSpecChange, renameOpenSpecChange } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import {
@@ -21,6 +19,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  useDeleteChange,
+  useRenameChange,
+} from "@/features/pipeline/api/hooks/use-change-mutations";
 import { cn } from "@/lib/utils";
 
 interface ChangeActionsProps {
@@ -29,26 +31,22 @@ interface ChangeActionsProps {
 }
 
 export function ChangeActions({ id, title }: ChangeActionsProps) {
-  const router = useRouter();
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isRenaming, setIsRenaming] = useState(false);
   const [newTitle, setNewTitle] = useState(title);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
+
+  const deleteMutation = useDeleteChange();
+  const renameMutation = useRenameChange();
 
   async function handleDelete(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     if (!confirm("Are you sure you want to delete this change?")) return;
 
-    setIsDeleting(true);
     try {
-      await deleteOpenSpecChange(id);
-      router.refresh();
+      await deleteMutation.mutateAsync(id);
     } catch (error) {
       console.error("Failed to delete change:", error);
       alert("Failed to delete change");
-    } finally {
-      setIsDeleting(false);
     }
   }
 
@@ -59,16 +57,12 @@ export function ChangeActions({ id, title }: ChangeActionsProps) {
       return;
     }
 
-    setIsRenaming(true);
     try {
-      await renameOpenSpecChange(id, newTitle);
-      router.refresh();
+      await renameMutation.mutateAsync({ changeId: id, newTitle });
       setShowRenameDialog(false);
     } catch (error) {
       console.error("Failed to rename change:", error);
       alert("Failed to rename change");
-    } finally {
-      setIsRenaming(false);
     }
   }
 
@@ -103,9 +97,9 @@ export function ChangeActions({ id, title }: ChangeActionsProps) {
           <DropdownMenuItem
             className="text-red-600 focus:text-red-600"
             onClick={handleDelete}
-            disabled={isDeleting}
+            disabled={deleteMutation.isPending}
           >
-            {isDeleting ? (
+            {deleteMutation.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Trash2 className="mr-2 h-4 w-4" />
@@ -146,8 +140,8 @@ export function ChangeActions({ id, title }: ChangeActionsProps) {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isRenaming}>
-                {isRenaming && (
+              <Button type="submit" disabled={renameMutation.isPending}>
+                {renameMutation.isPending && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
                 Save Changes
