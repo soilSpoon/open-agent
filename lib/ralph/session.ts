@@ -1,25 +1,25 @@
 /**
  * Ralph Session Persistence
- * 
+ *
  * Manages session.json read/write with:
  * - Atomic file operations (crash-safe)
  * - Schema versioning
  * - Lock file coordination
  */
 
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import type { 
-  SessionState, 
-  LockFile, 
-  LockStatus, 
-  ErrorStrategy 
-} from './types.js';
-import { CURRENT_SCHEMA_VERSION } from './types.js';
+import { randomUUID } from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import type {
+  ErrorStrategy,
+  LockFile,
+  LockStatus,
+  SessionState,
+} from "./types.js";
+import { CURRENT_SCHEMA_VERSION } from "./types.js";
 
-const SESSION_FILENAME = 'session.json';
-const LOCK_FILENAME = '.lock';
+const SESSION_FILENAME = "session.json";
+const LOCK_FILENAME = ".lock";
 
 export interface SessionManagerOptions {
   changeId: string;
@@ -38,7 +38,7 @@ export class SessionManager {
 
   constructor(options: SessionManagerOptions) {
     this.options = options;
-    this.ralphDir = path.join(options.changeBasePath, '.ralph');
+    this.ralphDir = path.join(options.changeBasePath, ".ralph");
     this.sessionPath = path.join(this.ralphDir, SESSION_FILENAME);
     this.lockPath = path.join(this.ralphDir, LOCK_FILENAME);
     this.sessionId = `sess-${randomUUID().slice(0, 8)}`;
@@ -50,7 +50,7 @@ export class SessionManager {
 
   async ensureDirectories(): Promise<void> {
     await fs.mkdir(this.ralphDir, { recursive: true });
-    await fs.mkdir(path.join(this.ralphDir, 'iterations'), { recursive: true });
+    await fs.mkdir(path.join(this.ralphDir, "iterations"), { recursive: true });
   }
 
   // ========================================================================
@@ -59,18 +59,20 @@ export class SessionManager {
 
   async readSession(): Promise<SessionState | null> {
     try {
-      const content = await fs.readFile(this.sessionPath, 'utf-8');
+      const content = await fs.readFile(this.sessionPath, "utf-8");
       const session = JSON.parse(content) as SessionState;
-      
+
       // Schema migration check
       if (session.schemaVersion !== CURRENT_SCHEMA_VERSION) {
-        console.warn(`[Session] Schema version mismatch: ${session.schemaVersion} vs ${CURRENT_SCHEMA_VERSION}`);
+        console.warn(
+          `[Session] Schema version mismatch: ${session.schemaVersion} vs ${CURRENT_SCHEMA_VERSION}`,
+        );
         // TODO: Implement migration logic here
       }
-      
+
       return session;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
       }
       throw error;
@@ -80,14 +82,14 @@ export class SessionManager {
   async writeSession(state: SessionState): Promise<void> {
     // Atomic write: write to temp file, then rename
     const tempPath = `${this.sessionPath}.tmp`;
-    
-    await fs.writeFile(tempPath, JSON.stringify(state, null, 2), 'utf-8');
-    
+
+    await fs.writeFile(tempPath, JSON.stringify(state, null, 2), "utf-8");
+
     // Ensure data is flushed to disk before renaming
-    const handle = await fs.open(tempPath, 'r+');
+    const handle = await fs.open(tempPath, "r+");
     await handle.sync();
     await handle.close();
-    
+
     // Atomic rename
     await fs.rename(tempPath, this.sessionPath);
   }
@@ -96,7 +98,7 @@ export class SessionManager {
     try {
       await fs.unlink(this.sessionPath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
     }
@@ -108,17 +110,17 @@ export class SessionManager {
 
   createInitialState(): SessionState {
     const now = new Date().toISOString();
-    
+
     return {
       schemaVersion: CURRENT_SCHEMA_VERSION,
       sessionId: this.sessionId,
       changeId: this.options.changeId,
-      status: 'running',
+      status: "running",
       currentTask: null,
       iteration: 0,
       maxIterations: this.options.maxIterations ?? 10,
       errorHandling: {
-        strategy: this.options.errorStrategy ?? 'analyze-retry',
+        strategy: this.options.errorStrategy ?? "analyze-retry",
         maxRetries: this.options.maxRetries ?? 3,
         currentRetryCount: 0,
       },
@@ -142,7 +144,7 @@ export class SessionManager {
 
     // Atomic write for lock file too
     const tempPath = `${this.lockPath}.tmp`;
-    await fs.writeFile(tempPath, JSON.stringify(lock, null, 2), 'utf-8');
+    await fs.writeFile(tempPath, JSON.stringify(lock, null, 2), "utf-8");
     await fs.rename(tempPath, this.lockPath);
   }
 
@@ -150,7 +152,7 @@ export class SessionManager {
     try {
       await fs.unlink(this.lockPath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
     }
@@ -158,28 +160,28 @@ export class SessionManager {
 
   async checkLock(): Promise<LockStatus> {
     try {
-      const content = await fs.readFile(this.lockPath, 'utf-8');
+      const content = await fs.readFile(this.lockPath, "utf-8");
       const lock = JSON.parse(content) as LockFile;
-      
+
       // Check if process is still running
       const isRunning = await this.isProcessRunning(lock.pid);
-      
+
       if (isRunning) {
-        return { status: 'locked', lock, stale: false };
+        return { status: "locked", lock, stale: false };
       }
-      
+
       // Process not running - check staleness
       const lockAge = Date.now() - new Date(lock.timestamp).getTime();
       const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
-      
+
       if (lockAge < STALE_THRESHOLD) {
-        return { status: 'stale', lock };
+        return { status: "stale", lock };
       }
-      
-      return { status: 'stale', lock };
+
+      return { status: "stale", lock };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { status: 'free' };
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { status: "free" };
       }
       throw error;
     }
@@ -199,15 +201,18 @@ export class SessionManager {
   // Context Management
   // ========================================================================
 
-  addFailureToContext(state: SessionState, failure: {
-    iteration: number;
-    taskId: string;
-    rootCause: string;
-    fixPlan: string;
-  }): void {
+  addFailureToContext(
+    state: SessionState,
+    failure: {
+      iteration: number;
+      taskId: string;
+      rootCause: string;
+      fixPlan: string;
+    },
+  ): void {
     // Add to recent failures
     state.context.recentFailures.push(failure);
-    
+
     // Keep only last 3 (rolling window)
     if (state.context.recentFailures.length > 3) {
       state.context.recentFailures.shift();
@@ -230,7 +235,7 @@ export class SessionManager {
   }
 
   getIterationsDir(): string {
-    return path.join(this.ralphDir, 'iterations');
+    return path.join(this.ralphDir, "iterations");
   }
 
   getSessionId(): string {
@@ -243,7 +248,7 @@ export class SessionManager {
 // ============================================================================
 
 export async function createSessionManager(
-  options: SessionManagerOptions
+  options: SessionManagerOptions,
 ): Promise<SessionManager> {
   const manager = new SessionManager(options);
   await manager.ensureDirectories();

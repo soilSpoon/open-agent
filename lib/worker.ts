@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import PQueue from "p-queue";
 import db from "./db";
-import { Ralph } from "./openspec/ralph";
 import { ProjectConfigSchema } from "./openspec/types";
+import { createRalphEngine, type RalphCallbacks } from "./ralph";
 import { logs, runs, tasks } from "./schema";
 
 /**
@@ -55,7 +55,7 @@ class RalphWorker {
     if (this.activeRunIds.has(run.id)) return;
     this.activeRunIds.add(run.id);
 
-    console.log(`[RalphWorker] [${run.id}] Starting execution loop`);
+    console.log(`[RalphWorker] [${run.id}] Starting execution loop (v2)`);
 
     try {
       if (!run.projectConfig || !run.changeId) {
@@ -72,79 +72,82 @@ class RalphWorker {
       }
 
       const config = ProjectConfigSchema.parse(JSON.parse(run.projectConfig));
-      const ralph = new Ralph(
-        config,
-        run.changeId,
-        {
-          onLog: async (level, message) => {
-            await this.log(run.id, level, `[Ralph] ${message}`);
-          },
-          onIterationComplete: async (iteration) => {
-            await db
-              .update(runs)
-              .set({ currentIteration: iteration })
-              .where(eq(runs.id, run.id));
-          },
-          onTaskStart: async (taskId, title) => {
-            console.log(`[RalphWorker] [${run.id}] Task Start: ${taskId}`);
-            await db
-              .update(runs)
-              .set({ lastTaskId: taskId })
-              .where(eq(runs.id, run.id));
 
-            const existingTask = await db.query.tasks.findFirst({
-              where: eq(tasks.id, taskId),
-            });
-            if (existingTask) {
-              await db
-                .update(tasks)
-                .set({ status: "running" })
-                .where(eq(tasks.id, taskId));
-            } else {
-              await db.insert(tasks).values({
-                id: taskId,
-                runId: run.id,
-                title: title,
-                status: "running",
-              });
-            }
-          },
-          onTaskComplete: async (taskId, success) => {
-            console.log(
-              `[RalphWorker] [${run.id}] Task Complete: ${taskId} (success: ${success})`,
-            );
+      // Create callbacks
+      const callbacks: RalphCallbacks = {
+        onLog: async (level, message) => {
+          await this.log(run.id, level, `[Ralph] ${message}`);
+        },
+        onIterationComplete: async (iteration) => {
+          await db
+            .update(runs)
+            .set({ currentIteration: iteration } as any)
+            .where(eq(runs.id, run.id));
+        },
+        onTaskStart: async (taskId, title) => {
+          console.log(`[RalphWorker] [${run.id}] Task Start: ${taskId}`);
+          await db
+            .update(runs)
+            .set({ lastTaskId: taskId } as any)
+            .where(eq(runs.id, run.id));
+
+          const existingTask = await db.query.tasks.findFirst({
+            where: eq(tasks.id, taskId),
+          });
+          if (existingTask) {
             await db
               .update(tasks)
-              .set({
-                status: success ? "completed" : "failed",
-              })
+              .set({ status: "running" })
               .where(eq(tasks.id, taskId));
-          },
-          onRunComplete: async (success, message) => {
-            console.log(`[RalphWorker] [${run.id}] Run Complete: ${message}`);
-            await db
-              .update(runs)
-              .set({
-                status: success ? "completed" : "failed",
-              })
-              .where(eq(runs.id, run.id));
-            await this.log(
-              run.id,
-              success ? "info" : "error",
-              `Loop terminated: ${message}`,
-            );
-          },
+          } else {
+            await db.insert(tasks).values({
+              id: taskId,
+              runId: run.id,
+              title: title,
+              status: "running",
+            });
+          }
         },
-        run.maxIterations || 10,
-      );
+        onTaskComplete: async (taskId, success) => {
+          console.log(
+            `[RalphWorker] [${run.id}] Task Complete: ${taskId} (success: ${success})`,
+          );
+          await db
+            .update(tasks)
+            .set({
+              status: success ? "completed" : "failed",
+            })
+            .where(eq(tasks.id, taskId));
+        },
+        onRunComplete: async (success, message) => {
+          console.log(`[RalphWorker] [${run.id}] Run Complete: ${message}`);
+          await db
+            .update(runs)
+            .set({
+              status: success ? "completed" : "failed",
+            })
+            .where(eq(runs.id, run.id));
+          await this.log(
+            run.id,
+            success ? "info" : "error",
+            `Loop terminated: ${message}`,
+          );
+        },
+      };
 
-      // Restore session state
-      if (run.currentIteration) {
-        ralph.setStartIteration(run.currentIteration);
-      }
+      // Create and run Ralph Engine v2
+      const engine = await createRalphEngine({
+        config,
+        changeId: run.changeId,
+        callbacks,
+        maxIterations: run.maxIterations || 10,
+        errorStrategy: "analyze-retry",
+        maxRetries: 3,
+        resume: !!run.currentIteration,
+      });
 
-      await ralph.run();
-      console.log(`[RalphWorker] [${run.id}] ralph.run() finished`);
+      const result = await engine.run();
+      console.log(`[RalphWorker] [${run.id}] engine.run() finished:`, result);
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
