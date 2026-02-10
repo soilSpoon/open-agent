@@ -37,6 +37,11 @@ const ExtractedIterationLogSchema = z.object({
   failureAnalysis: FailureAnalysisSchema.optional(),
 });
 
+export const ExtractedVerifierLogSchema = z.object({
+  status: z.enum(["success", "failed"]),
+  feedback: z.string(),
+});
+
 // ============================================================================
 // Regex Patterns (from ralph-tui benchmark)
 // ============================================================================
@@ -77,6 +82,7 @@ export const SUMMARY_PATTERNS = {
 /** JSON block delimiters (order matters - try most specific first) */
 const JSON_DELIMITERS: Array<{ start: string; end: string }> = [
   { start: "<RALPH_ITERATION_LOG_JSON>", end: "</RALPH_ITERATION_LOG_JSON>" },
+  { start: "<RALPH_VERIFIER_LOG_JSON>", end: "</RALPH_VERIFIER_LOG_JSON>" },
   { start: "```json", end: "```" },
   { start: "```", end: "```" },
   { start: "{", end: "}" }, // Last resort - try to find any JSON object
@@ -166,6 +172,50 @@ function tryExtractJson(output: string): Partial<IterationLog> | null {
     }
   }
   return null;
+}
+
+/**
+ * Extract verifier result from agent output
+ */
+export function extractVerifierResult(output: string): {
+  status: "success" | "failed";
+  feedback: string;
+} {
+  for (const delimiter of JSON_DELIMITERS) {
+    const startIndex = output.indexOf(delimiter.start);
+    if (startIndex === -1) continue;
+
+    const contentStart = startIndex + delimiter.start.length;
+    const endIndex = output.indexOf(delimiter.end, contentStart);
+    if (endIndex === -1) continue;
+
+    const jsonContent = output.slice(contentStart, endIndex).trim();
+
+    try {
+      const parsed: unknown = JSON.parse(jsonContent);
+      const validated = ExtractedVerifierLogSchema.safeParse(parsed);
+      if (validated.success) {
+        return validated.data;
+      }
+    } catch {
+      // Continue to next delimiter
+    }
+  }
+
+  // Fallback to regex if JSON extraction fails
+  const statusMatch = output.match(
+    /(?:status|verdict)[\s:]*\n*(success|failed)/i,
+  );
+  const feedbackMatch = output.match(
+    /(?:feedback|reason|comments?)[\s:]*\n*([^\n]+(?:\n(?![\n#])[^\n]+)*)/i,
+  );
+
+  return {
+    status: (statusMatch?.[1]?.toLowerCase() === "success"
+      ? "success"
+      : "failed") as "success" | "failed",
+    feedback: feedbackMatch?.[1]?.trim() || "No detailed feedback provided.",
+  };
 }
 
 function extractJsonWithDelimiter(
@@ -450,5 +500,3 @@ function normalizeIterationLog(
 
   return result;
 }
-
-

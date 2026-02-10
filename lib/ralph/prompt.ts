@@ -51,6 +51,10 @@ export interface TemplateVariables {
   codebasePatterns: string[];
   hasCodebasePatterns: boolean;
 
+  // Verifier context
+  verifierFeedback?: string;
+  hasVerifierFeedback: boolean;
+
   // Progress
   recentProgress: string;
   hasRecentProgress: boolean;
@@ -72,6 +76,7 @@ export class PromptTemplateEngine {
     instruction: string,
     taskList: string,
     recentLogs: IterationLog[],
+    verifierFeedback?: string,
   ): TemplateVariables {
     const task = session.currentTask;
     if (!task) {
@@ -100,6 +105,8 @@ export class PromptTemplateEngine {
       hasRecentFailures: recentFailures.length > 0,
       codebasePatterns: session.context.codebasePatterns,
       hasCodebasePatterns: session.context.codebasePatterns.length > 0,
+      verifierFeedback,
+      hasVerifierFeedback: !!verifierFeedback,
       recentProgress,
       hasRecentProgress: recentProgress.length > 0,
     };
@@ -150,6 +157,20 @@ export class PromptTemplateEngine {
         }
         parts.push("");
       });
+      parts.push("");
+    }
+
+    // Previous Verifier Feedback
+    if (v.hasVerifierFeedback) {
+      parts.push("## PREVIOUS VERIFIER FEEDBACK");
+      parts.push("");
+      parts.push(
+        "The following feedback was provided by the Verifier in a previous iteration. Please address these issues specifically:",
+      );
+      parts.push("");
+      if (v.verifierFeedback) {
+        parts.push(v.verifierFeedback);
+      }
       parts.push("");
     }
 
@@ -327,6 +348,82 @@ export class PromptTemplateEngine {
     }
 
     return lines.join("\n");
+  }
+
+  /**
+   * Generate the verifier prompt
+   */
+  generateVerifierPrompt(v: TemplateVariables): string {
+    const parts: string[] = [];
+
+    parts.push("# Ralph Verifier Mode");
+    parts.push("");
+    parts.push(
+      "You are a strict Verifier agent reviewing the work of a Developer agent.",
+    );
+    parts.push("");
+    parts.push("## YOUR MISSION");
+    parts.push("");
+    parts.push(
+      "1. **Audit the filesystem**: Read the codebase to see what was actually changed.",
+    );
+    parts.push(
+      "2. **Judge compliance**: Compare the current state against the original specifications and instructions.",
+    );
+    parts.push(
+      "3. **Verify Quality**: Ensure quality checks and tests pass as expected.",
+    );
+    parts.push("");
+    parts.push(
+      "DO NOT trust the Developer's claims. Rely ONLY on what you see in the filesystem.",
+    );
+    parts.push("");
+
+    // Current Task
+    parts.push("## TASK BEING REVIEWED");
+    parts.push(`- **ID**: ${v.taskId}`);
+    parts.push(`- **Description**: ${v.taskDescription}`);
+    parts.push("");
+
+    // Authoritative Spec
+    parts.push("## AUTHORITATIVE SPEC & INSTRUCTIONS");
+    parts.push("");
+    parts.push("### Instructions");
+    parts.push(v.instruction);
+    parts.push("");
+    parts.push("### Spec Context (change.json)");
+    parts.push(v.specContext);
+    parts.push("");
+
+    // Verifier Guidelines
+    parts.push("## VERIFIER GUIDELINES");
+    parts.push("");
+    parts.push(
+      "- If the work is incomplete or incorrect, be specific about what's missing.",
+    );
+    parts.push(
+      "- If tests are missing or failing, provide clear instructions for the Developer.",
+    );
+    parts.push(
+      "- If the implementation deviates from the spec without justification, mark it as failed.",
+    );
+    parts.push("");
+
+    // Response Format
+    parts.push("## RESPONSE FORMAT");
+    parts.push("");
+    parts.push("Provide your verdict in this exact JSON format:");
+    parts.push("");
+    parts.push("<RALPH_VERIFIER_LOG_JSON>");
+    parts.push("{");
+    parts.push('  "status": "success | failed",');
+    parts.push(
+      '  "feedback": "Detailed feedback for the developer if failed, or summary of verification if success"',
+    );
+    parts.push("}");
+    parts.push("</RALPH_VERIFIER_LOG_JSON>");
+
+    return parts.join("\n");
   }
 
   /**

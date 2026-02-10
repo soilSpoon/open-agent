@@ -159,6 +159,7 @@ export const IterationLogSchema = z.object({
   implemented: z.array(z.string()).optional(),
   codebasePatterns: z.array(z.string()).optional(),
   summary: z.string().optional(),
+  verifierFeedback: z.string().optional(),
   failureAnalysis: FailureAnalysisSchema.optional(),
   commitBefore: z.string().optional(),
   commitAfter: z.string().optional(),

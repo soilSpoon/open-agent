@@ -11,12 +11,16 @@
  */
 
 import { exec } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { ProjectConfig } from "../openspec/types.js";
-import { extractFailureAnalysis, extractFromOutput } from "./extraction";
+import {
+  extractFailureAnalysis,
+  extractFromOutput,
+  extractVerifierResult,
+} from "./extraction";
 import {
   createIterationPersistence,
   type IterationPersistence,
@@ -140,6 +144,7 @@ export class RalphEngine {
   // Paths
   private changeBasePath: string;
   private ralphDir: string;
+  private verifierFeedbackPath: string;
 
   constructor(options: RalphEngineOptions) {
     this.config = options.config;
@@ -147,7 +152,7 @@ export class RalphEngine {
     this.callbacks = options.callbacks;
     this.maxIterations = options.maxIterations ?? 10;
     this.errorStrategy = options.errorStrategy ?? "analyze-retry";
-    this.maxRetries = options.maxRetries ?? 3;
+    this.maxRetries = options.maxRetries ?? 2;
 
     this.changeBasePath = join(
       this.config.path,
@@ -156,6 +161,7 @@ export class RalphEngine {
       this.changeId,
     );
     this.ralphDir = join(this.changeBasePath, ".ralph");
+    this.verifierFeedbackPath = join(this.ralphDir, "verification-feedback.md");
   }
 
   // ========================================================================
@@ -382,12 +388,15 @@ export class RalphEngine {
         .map((t) => `${t.done ? "✓" : " "} [${t.id}] ${t.description}`)
         .join("\n");
 
+      const verifierFeedback = await this.getVerifierFeedback();
+
       const variables = this.promptEngine.buildVariables(
         session,
         specContext,
         status.instruction,
         taskList,
         recentLogs,
+        verifierFeedback,
       );
       const prompt = this.promptEngine.generateMainPrompt(variables);
 
@@ -405,8 +414,26 @@ export class RalphEngine {
       );
 
       // Determine status based on dual-gate verification
-      const isSuccessful =
+      let isSuccessful =
         structured.agentClaimedComplete && verificationEvidence.allChecksPassed;
+
+      let verifierFeedbackResult: string | undefined;
+
+      if (isSuccessful) {
+        const verifierResult = await this.runVerifier(
+          session,
+          specContext,
+          status.instruction,
+          taskList,
+        );
+        verifierFeedbackResult = verifierResult.feedback;
+        if (verifierResult.status === "failed") {
+          isSuccessful = false;
+          await this.saveVerifierFeedback(verifierFeedbackResult);
+        } else {
+          await this.clearVerifierFeedback();
+        }
+      }
 
       // Identify changes made during THIS iteration
       const { stdout: currentStatus } = await execAsync(
@@ -464,6 +491,7 @@ export class RalphEngine {
         promptTokens: this.promptEngine.estimateTokens(prompt),
         agentClaimedComplete: structured.agentClaimedComplete ?? false,
         verificationEvidence,
+        verifierFeedback: verifierFeedbackResult,
         context: structured.context,
         implemented: structured.implemented ?? [],
         codebasePatterns: structured.codebasePatterns ?? [],
@@ -492,9 +520,18 @@ export class RalphEngine {
         };
       } else {
         // It failed verification even if agent claimed complete
-        const rootCause = verificationEvidence.allChecksPassed
+        let rootCause = verificationEvidence.allChecksPassed
           ? "Agent did not claim complete"
           : "Quality checks or spec validation failed";
+
+        let fixPlan = "Fix the reported errors and ensure all checks pass.";
+        let errorMessage = verificationEvidence.checkOutput;
+
+        if (verifierFeedbackResult && verificationEvidence.allChecksPassed) {
+          rootCause = "Verifier review failed";
+          fixPlan = verifierFeedbackResult;
+          errorMessage = verifierFeedbackResult;
+        }
 
         return {
           taskCompleted: false,
@@ -502,8 +539,8 @@ export class RalphEngine {
           shouldEscalate: false,
           failureAnalysis: {
             rootCause,
-            fixPlan: "Fix the reported errors and ensure all checks pass.",
-            errorMessage: verificationEvidence.checkOutput,
+            fixPlan,
+            errorMessage,
             errorType: "validation",
           },
         };
@@ -588,6 +625,39 @@ export class RalphEngine {
         failureAnalysis,
       };
     }
+  }
+
+  private async runVerifier(
+    session: SessionState,
+    specContext: string,
+    instruction: string,
+    taskList: string,
+  ): Promise<{ status: "success" | "failed"; feedback: string }> {
+    await this.log("info", "Starting Verifier review...");
+
+    const variables = this.promptEngine.buildVariables(
+      session,
+      specContext,
+      instruction,
+      taskList,
+      [], // No recent logs for verifier to keep it independent
+    );
+
+    const prompt = this.promptEngine.generateVerifierPrompt(variables);
+
+    // Run verifier in a fresh session to ensure independence
+    // We use the same runtime but a different agent execution which shouldn't carry over history
+    // unless the runtime implementation specifically maintains it.
+    // SandboxSdkRuntime.runAgentExecute typically starts a fresh session.
+    const response = await this.executeAgent(prompt);
+    const result = extractVerifierResult(response);
+
+    await this.log(
+      result.status === "success" ? "info" : "warn",
+      `Verifier finished with status: ${result.status}`,
+    );
+
+    return result;
   }
 
   // ========================================================================
@@ -719,6 +789,26 @@ export class RalphEngine {
   // ========================================================================
   // Utilities
   // ========================================================================
+
+  private async getVerifierFeedback(): Promise<string | undefined> {
+    try {
+      return await readFile(this.verifierFeedbackPath, "utf-8");
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async saveVerifierFeedback(feedback: string): Promise<void> {
+    await writeFile(this.verifierFeedbackPath, feedback, "utf-8");
+  }
+
+  private async clearVerifierFeedback(): Promise<void> {
+    try {
+      await unlink(this.verifierFeedbackPath);
+    } catch {
+      // Ignore
+    }
+  }
 
   private async getSpecContext(): Promise<string> {
     const changeFile = join(this.changeBasePath, "change.json");
