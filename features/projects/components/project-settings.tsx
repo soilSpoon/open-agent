@@ -52,7 +52,6 @@ export function ProjectSettings() {
   const editNameId = useId();
   const editPathId = useId();
   const editCmdId = useId();
-  const _editPreCmdId = useId();
 
   const handleAddProject = async () => {
     if (!newProject.name || !newProject.path) return;

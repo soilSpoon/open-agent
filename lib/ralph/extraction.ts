@@ -8,22 +8,18 @@
  */
 
 import { z } from "zod";
-import type { FailureAnalysis, IterationLog } from "./types";
+import {
+  type FailureAnalysis,
+  FailureAnalysisSchema,
+  type IterationLog,
+  IterationStatusSchema,
+} from "./types";
 
 // ============================================================================
-// Zod Schemas for Safe Parsing
+// Internal Normalized Schemas (for partial mapping from LLM)
 // ============================================================================
 
-const IterationStatusSchema = z.enum(["success", "failed", "in_progress"]);
-
-const FailureAnalysisSchema = z.object({
-  rootCause: z.string(),
-  fixPlan: z.string(),
-  errorMessage: z.string(),
-  errorType: z.enum(["validation", "runtime", "timeout", "unknown"]),
-});
-
-const IterationLogSchema = z.object({
+const ExtractedIterationLogSchema = z.object({
   threadId: z.string().optional(),
   task: z.string().optional(),
   taskId: z.string().optional(),
@@ -79,7 +75,7 @@ export const SUMMARY_PATTERNS = {
 };
 
 /** JSON block delimiters (order matters - try most specific first) */
-const JSON_DELIMITERS = [
+const JSON_DELIMITERS: Array<{ start: string; end: string }> = [
   { start: "<RALPH_ITERATION_LOG_JSON>", end: "</RALPH_ITERATION_LOG_JSON>" },
   { start: "```json", end: "```" },
   { start: "```", end: "```" },
@@ -176,7 +172,7 @@ function extractJsonWithDelimiter(
   output: string,
   startDelimiter: string,
   endDelimiter: string,
-): unknown {
+): z.infer<typeof ExtractedIterationLogSchema> | null {
   const startIndex = output.indexOf(startDelimiter);
   if (startIndex === -1) return null;
 
@@ -187,7 +183,9 @@ function extractJsonWithDelimiter(
   const jsonContent = output.slice(contentStart, endIndex).trim();
 
   try {
-    return JSON.parse(jsonContent);
+    const parsed: unknown = JSON.parse(jsonContent);
+    const validated = ExtractedIterationLogSchema.safeParse(parsed);
+    return validated.success ? validated.data : null;
   } catch {
     return null;
   }
@@ -372,16 +370,11 @@ function sanitizeRawOutput(output: string): string {
 }
 
 /**
- * Normalize extracted data to IterationLog shape using Zod validation
+ * Normalize extracted data to IterationLog shape
  */
-function normalizeIterationLog(data: unknown): Partial<IterationLog> {
-  // Validate with Zod schema first
-  const parsed = IterationLogSchema.safeParse(data);
-  if (!parsed.success) {
-    return {};
-  }
-
-  const validated = parsed.data;
+function normalizeIterationLog(
+  validated: z.infer<typeof ExtractedIterationLogSchema>,
+): Partial<IterationLog> {
   const result: Partial<IterationLog> = {};
 
   // Map threadId
@@ -458,15 +451,4 @@ function normalizeIterationLog(data: unknown): Partial<IterationLog> {
   return result;
 }
 
-// ============================================================================
-// Export for Testing
-// ============================================================================
 
-export const _testing = {
-  tryExtractJson,
-  tryExtractRegex,
-  extractJsonWithDelimiter,
-  parseListItems,
-  categorizeError,
-  normalizeIterationLog,
-};

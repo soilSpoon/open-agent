@@ -24,7 +24,7 @@ const ToolUseContentSchema = z.object({
   name: z.string(),
   input: z.custom<ToolInput>((val) => {
     if (typeof val !== "object" || val === null) return false;
-    return Object.entries(val).every(([_, v]) => {
+    return Object.values(val).every((v) => {
       const type = typeof v;
       return (
         type === "string" ||
@@ -316,7 +316,7 @@ async function runAmp(prompt: string): Promise<string> {
             } else if (isErrorMessage(msg)) {
               console.error("Amp execution error:", msg.error);
             }
-          } catch (_) {}
+          } catch {}
         }
       });
 

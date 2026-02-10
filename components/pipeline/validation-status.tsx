@@ -87,8 +87,6 @@ export function ValidationStatus({
     }
   };
 
-  const _errorCount = validation?.errors?.length || 0;
-
   // Filter out "No deltas found" error as it's common during initial drafting
   const filteredErrors =
     validation?.errors?.filter((err) => !err.includes("No deltas found")) || [];

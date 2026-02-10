@@ -70,7 +70,7 @@ export function parseCapabilities(proposalContent: string): CapabilitiesResult {
  */
 export function checkCapabilityCoverage(
   capabilities: CapabilitiesResult,
-  specFiles: { path: string; name: string }[]
+  specFiles: { path: string; name: string }[],
 ): {
   covered: string[];
   missing: string[];

@@ -40,7 +40,7 @@ export function CapabilitiesChecklist({
         className={cn(
           allCovered
             ? "bg-green-50 border-green-200"
-            : "bg-amber-50 border-amber-200"
+            : "bg-amber-50 border-amber-200",
         )}
       >
         {allCovered ? (

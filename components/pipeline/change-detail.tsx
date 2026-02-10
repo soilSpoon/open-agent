@@ -32,8 +32,8 @@ import {
 } from "@/features/pipeline/stores/pipeline-store";
 import { useProjects } from "@/features/projects/api/hooks/use-projects";
 import { useSelectedProjectId } from "@/features/projects/stores/project-store";
-import { useStartRalphRun } from "@/features/runs/api/hooks/use-start-ralph-run";
 import { useRalphEvents } from "@/features/runs/api/hooks/use-ralph-events";
+import { useStartRalphRun } from "@/features/runs/api/hooks/use-start-ralph-run";
 import type { OpenSpecChange } from "@/lib/openspec/types";
 import { useSettings } from "@/lib/settings-context";
 import { cn } from "@/lib/utils";

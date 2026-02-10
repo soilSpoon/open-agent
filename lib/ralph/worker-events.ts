@@ -1,14 +1,35 @@
-import { EventEmitter } from "events";
-import { TypedEventEmitter } from "./typed-emitter";
-import { RalphEvent } from "./events";
+import { EventEmitter } from "node:events";
+import type { RalphEvent } from "./events";
 
-// TypedEventEmitter는 EventEmitter를 상속받아 RalphEvent를 타입 안정성 있게 처리합니다.
-export const workerEvents = new EventEmitter() as TypedEventEmitter<{
-  "event": (event: RalphEvent) => void;
-}>;
-
-export interface TypedEventEmitter<T extends Record<string, any>> {
-  on<K extends keyof T>(event: K, listener: T[K]): this;
-  off<K extends keyof T>(event: K, listener: T[K]): this;
-  emit<K extends keyof T>(event: K, ...args: Parameters<T[K]>): boolean;
+interface TypedEventMap {
+  event: (event: RalphEvent) => void;
 }
+
+class WorkerEventEmitter {
+  private emitter = new EventEmitter();
+
+  on<K extends keyof TypedEventMap>(
+    event: K,
+    listener: TypedEventMap[K],
+  ): this {
+    this.emitter.on(event, listener);
+    return this;
+  }
+
+  off<K extends keyof TypedEventMap>(
+    event: K,
+    listener: TypedEventMap[K],
+  ): this {
+    this.emitter.off(event, listener);
+    return this;
+  }
+
+  emit<K extends keyof TypedEventMap>(
+    event: K,
+    ...args: Parameters<TypedEventMap[K]>
+  ): boolean {
+    return this.emitter.emit(event, ...args);
+  }
+}
+
+export const workerEvents = new WorkerEventEmitter();

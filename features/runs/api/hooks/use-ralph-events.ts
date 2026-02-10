@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { RalphEvent } from "@/lib/ralph/events";
+import { useEffect } from "react";
+import type { RalphEvent } from "@/lib/ralph/events";
 
 /**
  * Hook to subscribe to real-time RalphWorker events via SSE.
@@ -29,15 +29,18 @@ export function useRalphEvents(runId?: string) {
           queryClient.invalidateQueries({ queryKey: ["run", data.runId] });
         } else if (data.type === "log") {
           // Optimistically append log if we have a list of logs
-          queryClient.setQueryData(["logs", data.runId], (old: any[] | undefined) => {
-            if (!old) return [data];
-            return [...old, data];
-          });
+          queryClient.setQueryData(
+            ["logs", data.runId],
+            (old: RalphEvent[] | undefined) => {
+              if (!old) return [data];
+              return [...old, data];
+            },
+          );
         } else if (data.type.startsWith("task:")) {
           queryClient.invalidateQueries({ queryKey: ["tasks", data.runId] });
         }
-      } catch (err) {
-        console.error("[useRalphEvents] Failed to parse event:", err);
+      } catch {
+        // Ignore parse errors
       }
     };
 

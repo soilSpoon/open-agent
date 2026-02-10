@@ -1,8 +1,19 @@
 "use client";
-import { Code, FileText, ListTodo, Lock, Palette, Activity } from "lucide-react";
-import type { ArtifactType, OpenSpecCLIStatus } from "@/lib/openspec/types";
-import { cn } from "@/lib/utils";
+import {
+  Activity,
+  Code,
+  FileText,
+  ListTodo,
+  Lock,
+  Palette,
+} from "lucide-react";
 import { usePipelineSchema } from "@/features/pipeline/api/hooks/use-pipeline-schema";
+import {
+  ArtifactTypeSchema,
+  type ArtifactType,
+  type OpenSpecCLIStatus,
+} from "@/lib/openspec/types";
+import { cn } from "@/lib/utils";
 
 interface PipelineViewProps {
   artifacts: Record<ArtifactType, { exists: boolean }>;
@@ -27,16 +38,23 @@ export function PipelineView({
 }: PipelineViewProps) {
   const { data: schema } = usePipelineSchema();
 
-  const stages = schema?.artifacts.map((a) => ({
-    id: a.id as ArtifactType,
-    icon: iconMap[a.id] || FileText,
-    label: a.id.charAt(0).toUpperCase() + a.id.slice(1),
-  })) || [
-    { id: "proposal" as ArtifactType, icon: FileText, label: "Proposal" },
-    { id: "specs" as ArtifactType, icon: Code, label: "Specs" },
-    { id: "design" as ArtifactType, icon: Palette, label: "Design" },
-    { id: "tasks" as ArtifactType, icon: ListTodo, label: "Tasks" },
+  const defaultStages: Array<{
+    id: ArtifactType;
+    icon: React.ComponentType<{ className?: string }>;
+    label: string;
+  }> = [
+    { id: "proposal", icon: FileText, label: "Proposal" },
+    { id: "specs", icon: Code, label: "Specs" },
+    { id: "design", icon: Palette, label: "Design" },
+    { id: "tasks", icon: ListTodo, label: "Tasks" },
   ];
+
+  const stages =
+    schema?.artifacts.map((a) => ({
+      id: ArtifactTypeSchema.parse(a.id),
+      icon: iconMap[a.id] || FileText,
+      label: a.id.charAt(0).toUpperCase() + a.id.slice(1),
+    })) || defaultStages;
 
   return (
     <div className="relative flex items-center justify-between w-full max-w-4xl mx-auto mb-8 px-2 md:px-4">

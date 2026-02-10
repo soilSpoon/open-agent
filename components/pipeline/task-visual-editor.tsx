@@ -30,7 +30,7 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
     const total = sections.reduce((acc, s) => acc + s.tasks.length, 0);
     const completed = sections.reduce(
       (acc, s) => acc + s.tasks.filter((t) => t.completed).length,
-      0
+      0,
     );
     const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
     const nextTask = sections
@@ -176,7 +176,11 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
             </div>
             {stats.nextTask && (
               <div className="text-xs text-muted-foreground">
-                Next: <span className="font-medium">{stats.nextTask.text.slice(0, 40)}{stats.nextTask.text.length > 40 ? '...' : ''}</span>
+                Next:{" "}
+                <span className="font-medium">
+                  {stats.nextTask.text.slice(0, 40)}
+                  {stats.nextTask.text.length > 40 ? "..." : ""}
+                </span>
               </div>
             )}
           </div>
@@ -216,12 +220,16 @@ export function TaskVisualEditor({ value, onChange }: TaskVisualEditorProps) {
               <div key={task.id} className="flex items-center gap-3 group">
                 <button
                   type="button"
-                  onClick={() => updateTask(section.id, task.id, { completed: !task.completed })}
+                  onClick={() =>
+                    updateTask(section.id, task.id, {
+                      completed: !task.completed,
+                    })
+                  }
                   className={cn(
                     "w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors",
                     task.completed
                       ? "bg-green-500 border-green-500 text-white"
-                      : "border-gray-300 hover:border-green-400"
+                      : "border-gray-300 hover:border-green-400",
                   )}
                 >
                   {task.completed && <Check className="w-3 h-3" />}

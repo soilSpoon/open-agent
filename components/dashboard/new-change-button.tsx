@@ -2,7 +2,7 @@
 
 import { Loader2, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +21,8 @@ import { useCreateChange } from "@/features/pipeline/api/hooks/use-create-change
 export function NewChangeButton() {
   const router = useRouter();
   const createChangeMutation = useCreateChange();
+  const titleId = useId();
+  const descriptionId = useId();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -63,9 +65,9 @@ export function NewChangeButton() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="title">제목</Label>
+              <Label htmlFor={titleId}>제목</Label>
               <Input
-                id="title"
+                id={titleId}
                 placeholder="예: Add Dark Mode"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -73,9 +75,9 @@ export function NewChangeButton() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="description">설명 (선택)</Label>
+              <Label htmlFor={descriptionId}>설명 (선택)</Label>
               <Textarea
-                id="description"
+                id={descriptionId}
                 placeholder="변경사항에 대한 자세한 설명, 배경, 목표 등을 적어주세요..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}

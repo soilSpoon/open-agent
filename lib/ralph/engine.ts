@@ -11,9 +11,8 @@
  */
 
 import { exec } from "node:child_process";
-import { access, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { ProjectConfig } from "../openspec/types.js";
@@ -28,12 +27,12 @@ import {
   type PromptEngineOptions,
   type PromptTemplateEngine,
 } from "./prompt";
+import { type SandboxRuntime, SandboxSdkRuntime } from "./sandbox-runtime";
 import {
   createSessionManager,
   type SessionManager,
   type SessionManagerOptions,
 } from "./session";
-import { SandboxSdkRuntime, type SandboxRuntime } from "./sandbox-runtime";
 import type {
   ErrorStrategy,
   FailureAnalysis,
@@ -109,11 +108,34 @@ export class RalphEngine {
   private errorStrategy: ErrorStrategy;
   private maxRetries: number;
 
-  // Core components
-  private sessionManager!: SessionManager;
-  private iterationPersistence!: IterationPersistence;
-  private promptEngine!: PromptTemplateEngine;
-  private runtime!: SandboxRuntime;
+  // Core components (initialized in initialize())
+  private activeSessionManager: SessionManager | undefined;
+  private activeIterationPersistence: IterationPersistence | undefined;
+  private activePromptEngine: PromptTemplateEngine | undefined;
+  private activeRuntime: SandboxRuntime | undefined;
+
+  private get sessionManager(): SessionManager {
+    if (!this.activeSessionManager)
+      throw new Error("Engine not initialized: sessionManager");
+    return this.activeSessionManager;
+  }
+
+  private get iterationPersistence(): IterationPersistence {
+    if (!this.activeIterationPersistence)
+      throw new Error("Engine not initialized: iterationPersistence");
+    return this.activeIterationPersistence;
+  }
+
+  private get promptEngine(): PromptTemplateEngine {
+    if (!this.activePromptEngine)
+      throw new Error("Engine not initialized: promptEngine");
+    return this.activePromptEngine;
+  }
+
+  private get runtime(): SandboxRuntime {
+    if (!this.activeRuntime) throw new Error("Engine not initialized: runtime");
+    return this.activeRuntime;
+  }
 
   // Paths
   private changeBasePath: string;
@@ -149,13 +171,13 @@ export class RalphEngine {
       errorStrategy: this.errorStrategy,
       maxRetries: this.maxRetries,
     };
-    this.sessionManager = await createSessionManager(sessionOptions);
+    this.activeSessionManager = await createSessionManager(sessionOptions);
 
     // Read existing session to get sandbox ID
     let session = await this.sessionManager.readSession();
 
     // Initialize sandbox runtime
-    this.runtime = new SandboxSdkRuntime({
+    this.activeRuntime = new SandboxSdkRuntime({
       projectPath: this.config.path,
       persistedSessionId: session?.context.sandbox?.sessionId,
       onLog: (level, message) => this.log(level, message),
@@ -168,7 +190,8 @@ export class RalphEngine {
       ralphDir: this.ralphDir,
       sessionId: this.sessionManager.getSessionId(),
     };
-    this.iterationPersistence = createIterationPersistence(iterationOptions);
+    this.activeIterationPersistence =
+      createIterationPersistence(iterationOptions);
 
     // Initialize prompt engine
     const checkCommand = this.config.checkCommand;
@@ -178,13 +201,13 @@ export class RalphEngine {
       projectPath: this.config.path,
       checkCommand,
     };
-    this.promptEngine = createPromptEngine(promptOptions);
+    this.activePromptEngine = createPromptEngine(promptOptions);
 
     // Ensure session is initialized and sandbox ID is saved
     if (!session) {
       session = this.sessionManager.createInitialState();
     }
-    
+
     if (!session.context.sandbox) {
       session.context.sandbox = {
         sessionId: this.runtime.sessionId,
@@ -780,25 +803,6 @@ export class RalphEngine {
 
   private getOpenspecBin(): string {
     return join(this.config.path, "node_modules", ".bin", "openspec");
-  }
-
-  private getAmpBin(): string {
-    const homeAmp = join(homedir(), ".amp", "bin", "amp");
-    if (require("node:fs").existsSync(homeAmp)) {
-      return homeAmp;
-    }
-
-    const projectAmp = join(
-      this.config.path,
-      "node_modules",
-      ".bin",
-      "amp",
-    );
-    if (require("node:fs").existsSync(projectAmp)) {
-      return projectAmp;
-    }
-
-    return "amp";
   }
 
   private async log(

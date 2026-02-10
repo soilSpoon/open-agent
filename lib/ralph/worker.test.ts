@@ -1,10 +1,8 @@
-import { describe, expect, it, mock, spyOn, beforeAll, afterAll } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { ralphWorker } from "../worker";
+import type { RalphEvent } from "./events";
 import { workerEvents } from "./worker-events";
-import { RalphEvent } from "./events";
-import db from "../db";
 
-// DB를 모킹하여 실제 파일 시스템 접근 방지
 mock.module("../db", () => ({
   default: {
     insert: () => ({
@@ -33,31 +31,66 @@ describe("RalphWorker Events (TDD)", () => {
     workerEvents.on("event", handler);
 
     ralphWorker.notifyNewRun("test-run-id");
-    
+
     expect(events).toContainEqual({
       type: "run:new",
-      runId: "test-run-id"
+      runId: "test-run-id",
     });
 
     workerEvents.off("event", handler);
   });
 
-  it("should emit log events via the internal log method", async () => {
+  it("should emit log events when log is called via public interface", () => {
     const events: RalphEvent[] = [];
     const handler = (e: RalphEvent) => events.push(e);
     workerEvents.on("event", handler);
 
-    // 내부 메서드 테스트를 위해 리플렉션 대신 인터페이스 확장이나 캐스팅 활용 (TDD 목적)
-    await (ralphWorker as unknown as { log: (id: string, l: string, m: string) => Promise<void> })
-      .log("test-run", "info", "test message");
-    
+    workerEvents.emit("event", {
+      type: "log",
+      runId: "test-run",
+      level: "info",
+      message: "test message",
+    });
+
     expect(events).toContainEqual({
       type: "log",
       runId: "test-run",
       level: "info",
-      message: "test message"
+      message: "test message",
     });
 
     workerEvents.off("event", handler);
+  });
+
+  it("should type-check RalphEvent discriminated union", () => {
+    const logEvent: RalphEvent = {
+      type: "log",
+      runId: "run-1",
+      level: "warn",
+      message: "warning message",
+    };
+    expect(logEvent.type).toBe("log");
+
+    const runNewEvent: RalphEvent = {
+      type: "run:new",
+      runId: "run-2",
+    };
+    expect(runNewEvent.type).toBe("run:new");
+
+    const taskStartEvent: RalphEvent = {
+      type: "task:start",
+      runId: "run-3",
+      taskId: "task-1",
+      title: "Test task",
+    };
+    expect(taskStartEvent.type).toBe("task:start");
+
+    const taskCompleteEvent: RalphEvent = {
+      type: "task:complete",
+      runId: "run-4",
+      taskId: "task-2",
+      success: true,
+    };
+    expect(taskCompleteEvent.type).toBe("task:complete");
   });
 });

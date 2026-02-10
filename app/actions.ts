@@ -7,6 +7,7 @@ import {
   fixAllArtifacts,
   generateArtifactInstructions,
 } from "@/lib/openspec/generator";
+import { loadOpenSpecSchema } from "@/lib/openspec/schema-loader";
 import {
   createChange,
   deleteChange,
@@ -16,14 +17,16 @@ import {
   renameChange,
   saveArtifact,
 } from "@/lib/openspec/service";
-import type { ArtifactType, ProjectConfig } from "@/lib/openspec/types";
+import {
+  ProjectConfigSchema,
+  type ArtifactType,
+  type ProjectConfig,
+} from "@/lib/openspec/types";
 import { validateChange } from "@/lib/openspec/validator";
 import { createIterationPersistence } from "@/lib/ralph/iteration";
-import type { IterationLog } from "@/lib/ralph/types";
+import { SessionStateSchema, type IterationLog } from "@/lib/ralph/types";
 import { logs, projects, runs, tasks } from "@/lib/schema";
 import { ralphWorker } from "@/lib/worker";
-
-import { loadOpenSpecSchema } from "@/lib/openspec/schema-loader";
 
 export async function getPipelineSchema() {
   return await loadOpenSpecSchema();
@@ -52,7 +55,10 @@ export async function getDashboardStats() {
   };
 }
 
-export async function createOpenSpecChange(title: string, description?: string) {
+export async function createOpenSpecChange(
+  title: string,
+  description?: string,
+) {
   return await createChange(title, description);
 }
 
@@ -181,7 +187,7 @@ export async function retryRun(runId: string) {
   }
 
   const projectConfig = oldRun.projectConfig
-    ? (JSON.parse(oldRun.projectConfig) as ProjectConfig)
+    ? ProjectConfigSchema.parse(JSON.parse(oldRun.projectConfig))
     : undefined;
 
   // Reset iteration count to 0 while preserving learned context
@@ -196,17 +202,19 @@ export async function retryRun(runId: string) {
     );
     try {
       const content = await fs.readFile(sessionPath, "utf-8");
-      const session = JSON.parse(content) as {
-        iteration: number;
-        status: string;
-        errorHandling: { currentRetryCount: number };
+      const session = SessionStateSchema.parse(JSON.parse(content));
+      const resetSession = {
+        ...session,
+        iteration: 0,
+        status: "running" as const,
+        errorHandling: {
+          ...session.errorHandling,
+          currentRetryCount: 0,
+        },
       };
-      session.iteration = 0;
-      session.status = "running";
-      session.errorHandling.currentRetryCount = 0;
       await fs.writeFile(
         sessionPath,
-        JSON.stringify(session, null, 2),
+        JSON.stringify(resetSession, null, 2),
         "utf-8",
       );
     } catch {
@@ -239,7 +247,7 @@ export async function getRun(runId: string) {
   // Try to load detailed iteration logs and tasks from files
   if (run.projectConfig && run.changeId) {
     try {
-      const config = JSON.parse(run.projectConfig) as ProjectConfig;
+      const config = ProjectConfigSchema.parse(JSON.parse(run.projectConfig));
       const changeBasePath = path.join(
         config.path,
         "openspec",

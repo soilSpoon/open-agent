@@ -119,8 +119,6 @@ export class SessionManager {
   // ========================================================================
 
   createInitialState(): SessionState {
-    const _now = new Date().toISOString();
-
     return {
       schemaVersion: CURRENT_SCHEMA_VERSION,
       sessionId: this.sessionId,

@@ -3,8 +3,8 @@ import PQueue from "p-queue";
 import db from "./db";
 import { ProjectConfigSchema } from "./openspec/types";
 import { createRalphEngine, type RalphCallbacks } from "./ralph";
-import { logs, runs, tasks } from "./schema";
 import { workerEvents } from "./ralph/worker-events";
+import { logs, runs, tasks } from "./schema";
 
 /**
  * RalphWorker handles background task execution using a queue.
@@ -31,8 +31,10 @@ class RalphWorker {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
-    console.log("[RalphWorker] Ready and listening for new runs via notifyNewRun()");
-    
+    console.log(
+      "[RalphWorker] Ready and listening for new runs via notifyNewRun()",
+    );
+
     // Polling loop removed in favor of event-based processing via notifyNewRun()
     // Initial check for any pending runs on startup
     await this.processPendingRuns();

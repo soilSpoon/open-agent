@@ -41,7 +41,7 @@ export async function loadOpenSpecSchema(): Promise<OpenSpecSchema> {
     "openspec",
     "schemas",
     "spec-driven",
-    "schema.yaml"
+    "schema.yaml",
   );
 
   const content = await fs.readFile(schemaPath, "utf-8");
@@ -50,7 +50,9 @@ export async function loadOpenSpecSchema(): Promise<OpenSpecSchema> {
   return cachedSchema;
 }
 
-export function getArtifactDependencies(schema: OpenSpecSchema): Map<string, string[]> {
+export function getArtifactDependencies(
+  schema: OpenSpecSchema,
+): Map<string, string[]> {
   const deps = new Map<string, string[]>();
   for (const artifact of schema.artifacts) {
     deps.set(artifact.id, artifact.requires);
@@ -64,7 +66,7 @@ export function getArtifactOrder(schema: OpenSpecSchema): string[] {
 
 export function getArtifactById(
   schema: OpenSpecSchema,
-  id: string
+  id: string,
 ): OpenSpecSchemaArtifact | undefined {
   return schema.artifacts.find((a) => a.id === id);
 }

@@ -1,6 +1,6 @@
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
+import type { RalphEvent } from "@/lib/ralph/events";
 import { workerEvents } from "@/lib/ralph/worker-events";
-import { RalphEvent } from "@/lib/ralph/events";
 
 /**
  * SSE endpoint to stream RalphWorker events to the client.
@@ -17,7 +17,9 @@ export async function GET(req: NextRequest) {
         if (runId && event.runId !== runId) return;
 
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+          );
         } catch (err) {
           console.error("[SSE] Error enqueuing event:", err);
         }
@@ -25,13 +27,8 @@ export async function GET(req: NextRequest) {
 
       workerEvents.on("event", handler);
 
-      // Keep-alive heartbeat every 15 seconds
       const heartbeat = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(": heartbeat\n\n"));
-        } catch (err) {
-          clearInterval(heartbeat);
-        }
+        controller.enqueue(encoder.encode(": heartbeat\n\n"));
       }, 15000);
 
       req.signal.onabort = () => {
@@ -47,7 +44,7 @@ export async function GET(req: NextRequest) {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
     },
   });
 }

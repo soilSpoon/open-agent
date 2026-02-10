@@ -97,7 +97,10 @@ async function checkArtifact(
   }
 }
 
-export async function createChange(title: string, description?: string): Promise<OpenSpecChange> {
+export async function createChange(
+  title: string,
+  description?: string,
+): Promise<OpenSpecChange> {
   const id = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -145,10 +148,10 @@ export async function createChange(title: string, description?: string): Promise
       fs.readFile(path.join(templateDir, "tasks.md"), "utf-8"),
     ]);
 
-    const descriptionSection = description 
+    const descriptionSection = description
       ? `\n\n## Description\n\n${description}`
       : "";
-    
+
     const proposalWithTitle = `# Proposal: ${title}${descriptionSection}\n\n${proposal}`;
     const designWithTitle = `# Design: ${title}\n\n${design}`;
     const tasksWithTitle = `# Tasks: ${title}\n\n${tasks}`;

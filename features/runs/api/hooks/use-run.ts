@@ -23,10 +23,7 @@ export function useRun({ runId, enabled = true }: UseRunOptions) {
       });
     },
     enabled,
-    refetchInterval: (query) => {
-      // Polling is completely removed as real-time updates are handled via useRalphEvents (SSE).
-      return false;
-    },
+    refetchInterval: false,
     staleTime: 0,
   });
 }
