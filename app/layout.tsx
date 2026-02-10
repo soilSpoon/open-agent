@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { SidebarProvider } from "@/components/layout/sidebar-provider";
 import { SettingsProvider } from "@/components/settings-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import { WorkerInit } from "@/components/worker-init";
 import { Providers } from "./providers";
 
@@ -45,7 +46,10 @@ export default function RootLayout({
                   <Header />
                   <main className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6 bg-background">
                     <div className="mx-auto w-full max-w-7xl">
-                      <Providers>{children}</Providers>
+                      <Providers>
+                        {children}
+                        <Toaster />
+                      </Providers>
                     </div>
                   </main>
                 </div>

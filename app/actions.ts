@@ -476,21 +476,84 @@ export async function getActiveRuns() {
 
 // Project CRUD Actions
 
+interface OpenSpecConfig {
+  context?: string;
+  rules?: {
+    apply?: string[];
+    "verification-report"?: string[];
+  };
+}
+
+interface ProjectConfigData {
+  context?: string;
+  rulesApply?: string[];
+  rulesVerification?: string[];
+}
+
+async function readProjectConfig(
+  projectPath: string,
+): Promise<ProjectConfigData> {
+  const configPath = path.join(projectPath, "openspec", "config.yaml");
+  try {
+    const content = await fs.readFile(configPath, "utf-8");
+    const config = yaml.parse(content) as OpenSpecConfig | null;
+    if (!config) return {};
+    return {
+      context: config.context,
+      rulesApply: config.rules?.apply,
+      rulesVerification: config.rules?.["verification-report"],
+    };
+  } catch {
+    return {};
+  }
+}
+
 export async function getProjects() {
-  return await db.query.projects.findMany({
+  const dbProjects = await db.query.projects.findMany({
     orderBy: desc(projects.updatedAt),
   });
+
+  const enriched = await Promise.all(
+    dbProjects.map(async (project) => {
+      const config = await readProjectConfig(project.path);
+      return {
+        ...project,
+        context: config.context ?? undefined,
+        rulesApply: config.rulesApply
+          ? JSON.stringify(config.rulesApply)
+          : undefined,
+        rulesVerification: config.rulesVerification
+          ? JSON.stringify(config.rulesVerification)
+          : undefined,
+      };
+    }),
+  );
+
+  return enriched;
 }
 
 export async function getProject(id: string) {
-  return await db.query.projects.findFirst({
+  const project = await db.query.projects.findFirst({
     where: eq(projects.id, id),
   });
+  if (!project) return undefined;
+
+  const config = await readProjectConfig(project.path);
+  return {
+    ...project,
+    context: config.context ?? undefined,
+    rulesApply: config.rulesApply
+      ? JSON.stringify(config.rulesApply)
+      : undefined,
+    rulesVerification: config.rulesVerification
+      ? JSON.stringify(config.rulesVerification)
+      : undefined,
+  };
 }
 
 export async function createProject(
   name: string,
-  path: string,
+  projectPath: string,
   checkCommand?: string,
   preCheckCommand?: string,
   context?: string,
@@ -503,17 +566,14 @@ export async function createProject(
   await db.insert(projects).values({
     id,
     name,
-    path,
+    path: projectPath,
     checkCommand,
     preCheckCommand,
-    context,
-    rulesApply,
-    rulesVerification,
     createdAt: now,
     updatedAt: now,
   });
 
-  await syncProjectConfig(path, {
+  await syncProjectConfig(projectPath, {
     context,
     rulesApply,
     rulesVerification,
@@ -542,29 +602,41 @@ export async function updateProject(
 
   if (!project) throw new Error("Project not found");
 
+  const { context, rulesApply, rulesVerification, ...dbData } = data;
+
   await db
     .update(projects)
     .set({
-      ...data,
+      ...dbData,
       updatedAt: now,
     })
     .where(eq(projects.id, id));
 
   const updatedPath = data.path || project.path;
-  const updatedContext =
-    data.context !== undefined ? data.context : project.context;
-  const updatedRulesApply =
-    data.rulesApply !== undefined ? data.rulesApply : project.rulesApply;
-  const updatedRulesVerification =
-    data.rulesVerification !== undefined
-      ? data.rulesVerification
-      : project.rulesVerification;
 
-  await syncProjectConfig(updatedPath, {
-    context: updatedContext || undefined,
-    rulesApply: updatedRulesApply || undefined,
-    rulesVerification: updatedRulesVerification || undefined,
-  });
+  if (
+    context !== undefined ||
+    rulesApply !== undefined ||
+    rulesVerification !== undefined
+  ) {
+    const currentConfig = await readProjectConfig(updatedPath);
+
+    await syncProjectConfig(updatedPath, {
+      context: context !== undefined ? context : currentConfig.context,
+      rulesApply:
+        rulesApply !== undefined
+          ? rulesApply
+          : currentConfig.rulesApply
+            ? JSON.stringify(currentConfig.rulesApply)
+            : undefined,
+      rulesVerification:
+        rulesVerification !== undefined
+          ? rulesVerification
+          : currentConfig.rulesVerification
+            ? JSON.stringify(currentConfig.rulesVerification)
+            : undefined,
+    });
+  }
 }
 
 function parseRulesField(value?: string | null): string[] {
@@ -583,13 +655,15 @@ function parseRulesField(value?: string | null): string[] {
     .filter(Boolean);
 }
 
+interface SyncProjectConfigData {
+  context?: string;
+  rulesApply?: string;
+  rulesVerification?: string;
+}
+
 async function syncProjectConfig(
   projectPath: string,
-  data: {
-    context?: string;
-    rulesApply?: string;
-    rulesVerification?: string;
-  },
+  data: SyncProjectConfigData,
 ) {
   const configPath = path.join(projectPath, "openspec", "config.yaml");
   const configDir = path.dirname(configPath);
@@ -597,10 +671,10 @@ async function syncProjectConfig(
   try {
     await fs.mkdir(configDir, { recursive: true });
 
-    let config: any = {};
+    let config: OpenSpecConfig = {};
     try {
       const existing = await fs.readFile(configPath, "utf-8");
-      config = yaml.parse(existing);
+      config = (yaml.parse(existing) as OpenSpecConfig) ?? {};
     } catch {
       // New config
     }
@@ -621,6 +695,83 @@ async function syncProjectConfig(
   } catch (e) {
     console.error("Failed to sync project config:", e);
   }
+}
+
+export async function addRule(
+  projectPath: string,
+  ruleType: "apply" | "verification-report",
+  rule: string,
+) {
+  const configPath = path.join(projectPath, "openspec", "config.yaml");
+  let config: OpenSpecConfig = {};
+  try {
+    const existing = await fs.readFile(configPath, "utf-8");
+    config = (yaml.parse(existing) as OpenSpecConfig) ?? {};
+  } catch {}
+
+  if (!config.rules) config.rules = {};
+  if (!config.rules[ruleType]) config.rules[ruleType] = [];
+  config.rules[ruleType].push(rule);
+
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, yaml.stringify(config), "utf-8");
+}
+
+export async function updateRule(
+  projectPath: string,
+  ruleType: "apply" | "verification-report",
+  index: number,
+  rule: string,
+) {
+  const configPath = path.join(projectPath, "openspec", "config.yaml");
+  let config: OpenSpecConfig = {};
+  try {
+    const existing = await fs.readFile(configPath, "utf-8");
+    config = (yaml.parse(existing) as OpenSpecConfig) ?? {};
+  } catch {}
+
+  const rules = config.rules?.[ruleType];
+  if (!rules || index < 0 || index >= rules.length) {
+    throw new Error(`Rule index ${index} out of bounds`);
+  }
+  rules[index] = rule;
+
+  await fs.writeFile(configPath, yaml.stringify(config), "utf-8");
+}
+
+export async function deleteRule(
+  projectPath: string,
+  ruleType: "apply" | "verification-report",
+  index: number,
+) {
+  const configPath = path.join(projectPath, "openspec", "config.yaml");
+  let config: OpenSpecConfig = {};
+  try {
+    const existing = await fs.readFile(configPath, "utf-8");
+    config = (yaml.parse(existing) as OpenSpecConfig) ?? {};
+  } catch {}
+
+  const rules = config.rules?.[ruleType];
+  if (!rules || index < 0 || index >= rules.length) {
+    throw new Error(`Rule index ${index} out of bounds`);
+  }
+  rules.splice(index, 1);
+
+  await fs.writeFile(configPath, yaml.stringify(config), "utf-8");
+}
+
+export async function updateContext(projectPath: string, context: string) {
+  const configPath = path.join(projectPath, "openspec", "config.yaml");
+  let config: OpenSpecConfig = {};
+  try {
+    const existing = await fs.readFile(configPath, "utf-8");
+    config = (yaml.parse(existing) as OpenSpecConfig) ?? {};
+  } catch {}
+
+  config.context = context;
+
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, yaml.stringify(config), "utf-8");
 }
 
 export async function deleteProject(id: string) {

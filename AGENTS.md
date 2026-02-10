@@ -36,3 +36,16 @@
   - **Inference**: Rely on type inference by typing variables at definition/declaration rather than casting at usage.
   - **Type Guards**: Use custom type guards or Zod parsing to narrow types safely.
   - **Generics**: Use generics to maintain type safety across reusable functions.
+  - **Error Handling**: Use `try { ... } catch { ... }` (implicit catch) instead of `catch (error)` or `catch (_error)` when the error object is unused.
+
+## UI UX Patterns
+- **Optimistic UI**: Use optimistic updates for all user interactions (adding/editing/deleting).
+  - Update local state immediately.
+  - Use `useTransition` for server actions.
+  - Rollback state on error.
+- **Feedback**: Use `sonner` for toast notifications.
+  - Show success toasts for major actions (optional for small ones).
+  - ALWAYS show error toasts with clear messages on failure.
+- **Components**:
+  - Prefer `shadcn/ui` components.
+  - Use `lucide-react` for icons.

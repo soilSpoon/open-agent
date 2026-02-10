@@ -1,9 +1,12 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Settings2, Terminal, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { deleteProject, updateProject } from "@/app/actions";
+import { useState } from "react";
+import { toast } from "sonner";
+import { deleteProject, updateContext, updateProject } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,18 +19,86 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProjectConfig } from "@/features/projects/types";
+import { queryKeys } from "@/lib/query/keys";
+import { RuleListEditor } from "./rule-list-editor";
+
+function parseRules(value?: string | null): string[] {
+  if (!value) return [];
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr) && arr.every((x) => typeof x === "string"))
+        return arr;
+    } catch {}
+  }
+  return trimmed
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 export function ProjectDetail({ project }: { project: ProjectConfig }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+
+  const [context, setContext] = useState(project.context || "");
+  const [rulesApply, setRulesApply] = useState<string[]>(
+    parseRules(project.rulesApply),
+  );
+  const [rulesVerification, setRulesVerification] = useState<string[]>(
+    parseRules(project.rulesVerification),
+  );
 
   const handleUpdate = async (data: Partial<ProjectConfig>) => {
-    await updateProject(project.id, data);
+    try {
+      await updateProject(project.id, data);
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+      toast.success("Project updated successfully");
+    } catch {
+      toast.error("Failed to update project");
+    }
+  };
+
+  const handleContextBlur = async () => {
+    if (context !== project.context) {
+      const previousContext = project.context;
+      try {
+        await updateContext(project.path, context);
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+        toast.success("Context updated successfully");
+      } catch {
+        setContext(previousContext || "");
+        toast.error("Failed to update context");
+      }
+    }
+  };
+
+  const handleRulesChange = (
+    type: "apply" | "verification",
+    newRules: string[],
+  ) => {
+    if (type === "apply") {
+      setRulesApply(newRules);
+    } else {
+      setRulesVerification(newRules);
+    }
+    // Optimistic update, but we should also invalidate to sync with file system eventually
+    // Since RuleListEditor calls server actions directly, the file is already updated.
+    // We just invalidate to keep other parts of the app in sync.
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
   };
 
   const handleDelete = async () => {
+    // Implement custom confirmation dialog later if needed
     if (confirm("Are you sure you want to delete this project?")) {
-      await deleteProject(project.id);
-      router.push("/projects");
+      try {
+        await deleteProject(project.id);
+        toast.success("Project deleted successfully");
+        router.push("/projects");
+      } catch {
+        toast.error("Failed to delete project");
+      }
     }
   };
 
@@ -113,8 +184,9 @@ export function ProjectDetail({ project }: { project: ProjectConfig }) {
                 <Textarea
                   rows={6}
                   className="font-mono text-sm leading-relaxed"
-                  defaultValue={project.context}
-                  onBlur={(e) => handleUpdate({ context: e.target.value })}
+                  value={context}
+                  onChange={(e) => setContext(e.target.value)}
+                  onBlur={handleContextBlur}
                   placeholder="Describe the tech stack, architecture, and core conventions..."
                 />
               </CardContent>
@@ -131,12 +203,11 @@ export function ProjectDetail({ project }: { project: ProjectConfig }) {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <Textarea
-                    rows={12}
-                    className="font-mono text-xs leading-relaxed"
-                    defaultValue={project.rulesApply}
-                    onBlur={(e) => handleUpdate({ rulesApply: e.target.value })}
-                    placeholder="Rules for code generation..."
+                  <RuleListEditor
+                    rules={rulesApply}
+                    ruleType="apply"
+                    projectPath={project.path}
+                    onRulesChange={(rules) => handleRulesChange("apply", rules)}
                   />
                 </CardContent>
               </Card>
@@ -150,14 +221,13 @@ export function ProjectDetail({ project }: { project: ProjectConfig }) {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <Textarea
-                    rows={12}
-                    className="font-mono text-xs leading-relaxed"
-                    defaultValue={project.rulesVerification}
-                    onBlur={(e) =>
-                      handleUpdate({ rulesVerification: e.target.value })
+                  <RuleListEditor
+                    rules={rulesVerification}
+                    ruleType="verification-report"
+                    projectPath={project.path}
+                    onRulesChange={(rules) =>
+                      handleRulesChange("verification", rules)
                     }
-                    placeholder="Rules for checking the report..."
                   />
                 </CardContent>
               </Card>

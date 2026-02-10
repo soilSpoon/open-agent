@@ -127,6 +127,7 @@ describe("PromptTemplateEngine", () => {
         hasCodebasePatterns: false,
         recentProgress: "",
         hasRecentProgress: false,
+        hasVerifierFeedback: false,
       };
 
       const prompt = engine.generateMainPrompt(vars);
@@ -155,6 +156,7 @@ describe("PromptTemplateEngine", () => {
         hasCodebasePatterns: true,
         recentProgress: "",
         hasRecentProgress: false,
+        hasVerifierFeedback: false,
       };
 
       const prompt = engine.generateMainPrompt(vars);
@@ -183,6 +185,7 @@ describe("PromptTemplateEngine", () => {
         hasCodebasePatterns: false,
         recentProgress: "",
         hasRecentProgress: false,
+        hasVerifierFeedback: false,
       };
 
       const prompt = engine.generateMainPrompt(vars);
@@ -211,6 +214,7 @@ describe("PromptTemplateEngine", () => {
         hasCodebasePatterns: false,
         recentProgress: "",
         hasRecentProgress: false,
+        hasVerifierFeedback: false,
       };
 
       const prompt = engine.generateMainPrompt(vars);
