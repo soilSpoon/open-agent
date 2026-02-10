@@ -2,6 +2,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { desc, eq } from "drizzle-orm";
+import * as yaml from "yaml";
 import db from "@/lib/db";
 import {
   fixAllArtifacts,
@@ -18,15 +19,107 @@ import {
   saveArtifact,
 } from "@/lib/openspec/service";
 import {
-  ProjectConfigSchema,
   type ArtifactType,
   type ProjectConfig,
+  ProjectConfigSchema,
 } from "@/lib/openspec/types";
 import { validateChange } from "@/lib/openspec/validator";
 import { createIterationPersistence } from "@/lib/ralph/iteration";
-import { SessionStateSchema, type IterationLog } from "@/lib/ralph/types";
+import { type IterationLog, SessionStateSchema } from "@/lib/ralph/types";
 import { logs, projects, runs, tasks } from "@/lib/schema";
 import { ralphWorker } from "@/lib/worker";
+
+export interface ProjectProposal {
+  checkCommand: {
+    value: string;
+    confidence: number;
+    alternatives: string[];
+    evidence: string;
+  };
+  context: string;
+  rulesApply: string[];
+  rulesVerification: string[];
+}
+
+export async function analyzeProject(
+  projectPath: string,
+): Promise<ProjectProposal> {
+  const stats = await fs.stat(projectPath).catch(() => null);
+  if (!stats || !stats.isDirectory()) {
+    throw new Error("Invalid project path");
+  }
+
+  const files = await fs.readdir(projectPath);
+  const fingerprint: Record<string, any> = {
+    files: files.filter((f) => !f.startsWith(".")),
+    configs: {},
+  };
+
+  // Basic heuristic analysis
+  const hasPackageJson = files.includes("package.json");
+  const hasBunLock = files.includes("bun.lockb");
+  const hasPnpmLock = files.includes("pnpm-lock.yaml");
+  const hasCargoToml = files.includes("Cargo.toml");
+  const hasPyProject = files.includes("pyproject.toml");
+
+  let checkCommand = "npm test";
+  let evidence = "Default fallback";
+  let alternatives: string[] = [];
+
+  if (hasPackageJson) {
+    try {
+      const content = await fs.readFile(
+        path.join(projectPath, "package.json"),
+        "utf-8",
+      );
+      const pkg = JSON.parse(content);
+      const scripts = pkg.scripts || {};
+
+      const runtime = hasBunLock ? "bun" : hasPnpmLock ? "pnpm" : "npm";
+
+      if (scripts.check) {
+        checkCommand = `${runtime} run check`;
+        evidence = `Found 'check' script in package.json using ${runtime}`;
+      } else if (scripts.test) {
+        checkCommand = `${runtime} test`;
+        evidence = `Found 'test' script in package.json using ${runtime}`;
+      } else if (scripts.lint) {
+        checkCommand = `${runtime} run lint`;
+        evidence = `Found 'lint' script in package.json using ${runtime}`;
+      }
+
+      alternatives = Object.keys(scripts).map((s) => `${runtime} run ${s}`);
+    } catch (e) {}
+  } else if (hasCargoToml) {
+    checkCommand = "cargo check";
+    evidence = "Found Cargo.toml";
+    alternatives = ["cargo test", "cargo build"];
+  }
+
+  // Placeholder AI Proposal logic (to be replaced with actual LLM call if needed)
+  // For now, generating a structured template based on tech stack
+  const context = `This project is located at ${projectPath}.\nTech Stack: ${
+    hasPackageJson ? "Node.js/TS" : hasCargoToml ? "Rust" : "Unknown"
+  }`;
+
+  return {
+    checkCommand: {
+      value: checkCommand,
+      confidence: 0.8,
+      alternatives: alternatives.slice(0, 5),
+      evidence,
+    },
+    context,
+    rulesApply: [
+      "Follow existing code style and naming conventions.",
+      "Ensure all new features are properly typed.",
+    ],
+    rulesVerification: [
+      "Verify that the 'checkCommand' passes after changes.",
+      "Check for any regressions in core functionality.",
+    ],
+  };
+}
 
 export async function getPipelineSchema() {
   return await loadOpenSpecSchema();
@@ -400,6 +493,9 @@ export async function createProject(
   path: string,
   checkCommand?: string,
   preCheckCommand?: string,
+  context?: string,
+  rulesApply?: string,
+  rulesVerification?: string,
 ) {
   const id = Math.random().toString(36).substring(7);
   const now = new Date().toISOString();
@@ -410,8 +506,17 @@ export async function createProject(
     path,
     checkCommand,
     preCheckCommand,
+    context,
+    rulesApply,
+    rulesVerification,
     createdAt: now,
     updatedAt: now,
+  });
+
+  await syncProjectConfig(path, {
+    context,
+    rulesApply,
+    rulesVerification,
   });
 
   return id;
@@ -424,9 +529,18 @@ export async function updateProject(
     path?: string;
     checkCommand?: string;
     preCheckCommand?: string;
+    context?: string;
+    rulesApply?: string;
+    rulesVerification?: string;
   },
 ) {
   const now = new Date().toISOString();
+
+  const project = await db.query.projects.findFirst({
+    where: eq(projects.id, id),
+  });
+
+  if (!project) throw new Error("Project not found");
 
   await db
     .update(projects)
@@ -435,6 +549,78 @@ export async function updateProject(
       updatedAt: now,
     })
     .where(eq(projects.id, id));
+
+  const updatedPath = data.path || project.path;
+  const updatedContext =
+    data.context !== undefined ? data.context : project.context;
+  const updatedRulesApply =
+    data.rulesApply !== undefined ? data.rulesApply : project.rulesApply;
+  const updatedRulesVerification =
+    data.rulesVerification !== undefined
+      ? data.rulesVerification
+      : project.rulesVerification;
+
+  await syncProjectConfig(updatedPath, {
+    context: updatedContext || undefined,
+    rulesApply: updatedRulesApply || undefined,
+    rulesVerification: updatedRulesVerification || undefined,
+  });
+}
+
+function parseRulesField(value?: string | null): string[] {
+  if (!value) return [];
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr) && arr.every((x) => typeof x === "string"))
+        return arr;
+    } catch {}
+  }
+  return trimmed
+    .split("\n")
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+}
+
+async function syncProjectConfig(
+  projectPath: string,
+  data: {
+    context?: string;
+    rulesApply?: string;
+    rulesVerification?: string;
+  },
+) {
+  const configPath = path.join(projectPath, "openspec", "config.yaml");
+  const configDir = path.dirname(configPath);
+
+  try {
+    await fs.mkdir(configDir, { recursive: true });
+
+    let config: any = {};
+    try {
+      const existing = await fs.readFile(configPath, "utf-8");
+      config = yaml.parse(existing);
+    } catch {
+      // New config
+    }
+
+    if (data.context !== undefined) config.context = data.context;
+
+    if (!config.rules) config.rules = {};
+    if (data.rulesApply !== undefined) {
+      config.rules.apply = parseRulesField(data.rulesApply);
+    }
+    if (data.rulesVerification !== undefined) {
+      config.rules["verification-report"] = parseRulesField(
+        data.rulesVerification,
+      );
+    }
+
+    await fs.writeFile(configPath, yaml.stringify(config), "utf-8");
+  } catch (e) {
+    console.error("Failed to sync project config:", e);
+  }
 }
 
 export async function deleteProject(id: string) {

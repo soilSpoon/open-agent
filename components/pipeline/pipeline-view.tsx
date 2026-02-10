@@ -9,8 +9,8 @@ import {
 } from "lucide-react";
 import { usePipelineSchema } from "@/features/pipeline/api/hooks/use-pipeline-schema";
 import {
-  ArtifactTypeSchema,
   type ArtifactType,
+  ArtifactTypeSchema,
   type OpenSpecCLIStatus,
 } from "@/lib/openspec/types";
 import { cn } from "@/lib/utils";

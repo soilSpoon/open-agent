@@ -98,5 +98,8 @@ export const ProjectConfigSchema = z.object({
   path: z.string(),
   checkCommand: z.string().optional(),
   preCheckCommand: z.string().optional(),
+  context: z.string().optional(),
+  rulesApply: z.string().optional(),
+  rulesVerification: z.string().optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

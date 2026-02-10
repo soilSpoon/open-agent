@@ -9,6 +9,9 @@ interface CreateProjectInput {
   path: string;
   checkCommand?: string;
   preCheckCommand?: string;
+  context?: string;
+  rulesApply?: string;
+  rulesVerification?: string;
 }
 
 export function useCreateProject() {
@@ -21,6 +24,9 @@ export function useCreateProject() {
         input.path,
         input.checkCommand,
         input.preCheckCommand,
+        input.context,
+        input.rulesApply,
+        input.rulesVerification,
       );
       return result;
     },

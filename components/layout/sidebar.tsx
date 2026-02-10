@@ -1,4 +1,4 @@
-import { Home, Settings } from "lucide-react";
+import { Folder, Home, Settings } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +19,13 @@ export function Sidebar({ className }: { className?: string }) {
             >
               <Home className="h-4 w-4" />
               Dashboard
+            </Link>
+            <Link
+              href="/projects"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
+            >
+              <Folder className="h-4 w-4" />
+              Projects
             </Link>
             <Link
               href="/settings"

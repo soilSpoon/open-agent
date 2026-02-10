@@ -18,6 +18,9 @@ export function useProjects() {
         path: p.path,
         checkCommand: p.checkCommand ?? undefined,
         preCheckCommand: p.preCheckCommand ?? undefined,
+        context: p.context ?? undefined,
+        rulesApply: p.rulesApply ?? undefined,
+        rulesVerification: p.rulesVerification ?? undefined,
       }));
     },
     staleTime: STALE_TIME,

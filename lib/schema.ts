@@ -19,6 +19,9 @@ export const projects = sqliteTable("projects", {
   path: text("path").notNull().unique(),
   checkCommand: text("check_command"),
   preCheckCommand: text("pre_check_command"),
+  context: text("context"),
+  rulesApply: text("rules_apply"),
+  rulesVerification: text("rules_verification"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
